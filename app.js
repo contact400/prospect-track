@@ -15,7 +15,32 @@ let allUsers = [];
 let exportMode = false;
 let selectedMLS = new Set();
 let unsubscribeProspects = null;
-let activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all" };
+let activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all", type: "all", municipality: "all" };
+
+// ── Property type detection ────────────────────────────────
+function detectPropertyType(address) {
+  if (!address) return "house";
+  const a = address.toLowerCase();
+  if (/\bapp\.?\s*\d|#\s*\d|\bapt\.?\s*\d|, app |, apt |bureau\s*\d|suite\s*\d|unit\s*\d|\bunité\s*\d/.test(a)) return "condo";
+  return "house";
+}
+
+function extractMunicipality(address) {
+  if (!address) return "Unknown";
+  const match = address.match(/,\s*([^,(]+?)(?:\s*\(([^)]+)\))?\s*(?:H\w\d|\d[A-Z]\d|$)/i);
+  if (match) {
+    const inner = match[2] || match[1];
+    return inner.trim().replace(/\s+/g, " ");
+  }
+  const parts = address.split(",");
+  if (parts.length >= 2) return parts[parts.length - 1].trim().split(" ").slice(0,2).join(" ");
+  return "Unknown";
+}
+
+function getMunicipalities() {
+  const set = new Set(allProspects.map(p => extractMunicipality(p.listingAddress)));
+  return [...set].filter(Boolean).sort();
+}
 
 onAuthStateChanged(auth, async (user) => {
   if (user) {
@@ -122,12 +147,17 @@ function updateProspectCount() {
 function renderFilterBar() {
   const bar = document.getElementById("filterBar");
   if (!bar) return;
-  const hasActive = activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all";
+  const hasActive = activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all" || activeFilters.type !== "all" || activeFilters.municipality !== "all";
   const isOpen = bar.dataset.open === "true";
+
   const btn = (label, key, val, icon) => {
     const active = activeFilters[key] === val;
     return `<button onclick="setFilter('${key}','${val}')" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;white-space:nowrap;border:1px solid ${active ? 'var(--accent)' : 'var(--border-med)'};background:${active ? 'var(--accent)' : 'var(--surface)'};color:${active ? '#fff' : 'var(--text-2)'};font-weight:${active ? '500' : '400'};transition:all 0.15s;">${icon ? icon + ' ' : ''}${label}</button>`;
   };
+
+  const municipalities = getMunicipalities();
+  const municipalityBtns = municipalities.map(m => btn(m, "municipality", m, "")).join("");
+
   bar.innerHTML = `
     <div style="margin-bottom:${isOpen ? '0' : '16px'};">
       <button onclick="toggleFilterBar()" style="display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:99px;font-size:13px;font-family:var(--font);cursor:pointer;border:1px solid ${hasActive ? 'var(--accent)' : 'var(--border-med)'};background:${hasActive ? 'var(--accent-light)' : 'var(--surface)'};color:${hasActive ? 'var(--accent)' : 'var(--text-2)'};font-weight:${hasActive ? '500' : '400'};">
@@ -137,29 +167,45 @@ function renderFilterBar() {
     </div>
     ${isOpen ? `
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:16px;background:var(--surface);">
+
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Type</span>
+      ${btn("All", "type", "all", "")}
+      ${btn("Condo", "type", "condo", "🏢")}
+      ${btn("House", "type", "house", "🏠")}
+      <span style="width:1px;height:20px;background:var(--border);margin:0 2px;"></span>
+
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Municipality</span>
+      ${btn("All", "municipality", "all", "")}
+      ${municipalityBtns}
+      <span style="width:1px;height:20px;background:var(--border);margin:0 2px;"></span>
+
       <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Sort</span>
       ${btn("Newest", "sort", "newest", "↓")}
       ${btn("Oldest", "sort", "oldest", "↑")}
       ${btn("Price ↑", "sort", "price_asc", "")}
       ${btn("Price ↓", "sort", "price_desc", "")}
       <span style="width:1px;height:20px;background:var(--border);margin:0 2px;"></span>
+
       <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Mailers</span>
       ${btn("All", "mailing", "all", "")}
       ${btn("None sent", "mailing", "none", "✉️")}
       ${btn("1–3 sent", "mailing", "partial", "")}
       ${btn("All 4 sent", "mailing", "complete", "✅")}
       <span style="width:1px;height:20px;background:var(--border);margin:0 2px;"></span>
+
       <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Visits</span>
       ${btn("All", "visit", "all", "")}
       ${btn("Not visited", "visit", "none", "")}
       ${btn("Visited", "visit", "some", "🚪")}
       <span style="width:1px;height:20px;background:var(--border);margin:0 2px;"></span>
+
       <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Status</span>
       ${btn("All", "eval", "all", "")}
       ${btn("Eval booked", "eval", "booked", "📅")}
       ${btn("Contacted", "eval", "contacted", "☎️")}
       ${btn("No contact", "eval", "none", "")}
-      ${hasActive ? `<button onclick="resetFilters()" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;border:1px solid var(--red-bg);background:var(--red-bg);color:var(--red);font-weight:500;">✕ Reset</button>` : ""}
+
+      ${hasActive ? `<span style="width:1px;height:20px;background:var(--border);margin:0 2px;"></span><button onclick="resetFilters()" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;border:1px solid var(--red-bg);background:var(--red-bg);color:var(--red);font-weight:500;">✕ Reset all</button>` : ""}
     </div>` : ""}
   `;
 }
@@ -177,7 +223,7 @@ window.setFilter = function(key, val) {
 };
 
 window.resetFilters = function() {
-  activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all" };
+  activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all", type: "all", municipality: "all" };
   renderFilterBar();
   renderProspects();
 };
@@ -185,11 +231,18 @@ window.resetFilters = function() {
 function getFilteredAndSorted() {
   const q = document.getElementById("searchInput").value.toLowerCase();
   let list = [...allProspects];
+
   if (q) {
     list = list.filter(p => {
       const names = (p.owners || []).map(o => o.name).join(" ").toLowerCase();
       return p.mls?.includes(q) || p.listingAddress?.toLowerCase().includes(q) || names.includes(q);
     });
+  }
+  if (activeFilters.type !== "all") {
+    list = list.filter(p => detectPropertyType(p.listingAddress) === activeFilters.type);
+  }
+  if (activeFilters.municipality !== "all") {
+    list = list.filter(p => extractMunicipality(p.listingAddress) === activeFilters.municipality);
   }
   if (activeFilters.mailing !== "all") {
     list = list.filter(p => {
@@ -229,7 +282,7 @@ window.renderProspects = function () {
   renderFilterBar();
   const filtered = getFilteredAndSorted();
   const container = document.getElementById("prospectsContainer");
-  const hasActive = activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all";
+  const hasActive = activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all" || activeFilters.type !== "all" || activeFilters.municipality !== "all";
   if (!filtered.length) {
     container.innerHTML = `<div class="empty-state"><div class="empty-icon">◎</div>
       <div class="empty-title">${hasActive ? "No prospects match these filters" : "No prospects found"}</div>
@@ -248,11 +301,16 @@ function prospectCard(p) {
   const visits = (p.visits || []).length;
   const evalBooked = (p.visits || []).some(v => v.evalBooked === "yes");
   const contacted = (p.visits || []).some(v => v.contact === "yes");
+  const propType = detectPropertyType(p.listingAddress);
+  const municipality = extractMunicipality(p.listingAddress);
   const statusBadge = evalBooked
     ? `<span class="badge badge-green">Eval booked</span>`
     : contacted ? `<span class="badge badge-blue">Contacted</span>`
     : mailings > 0 ? `<span class="badge badge-amber">${mailings} mailing${mailings > 1 ? "s" : ""} sent</span>`
     : `<span class="badge badge-gray">Not contacted</span>`;
+  const typeBadge = propType === "condo"
+    ? `<span class="badge badge-blue" style="background:#EEEDFE;color:#3C3489;">🏢 Condo</span>`
+    : `<span class="badge badge-gray" style="background:#EAF3DE;color:#2D6A4F;">🏠 House</span>`;
   const sel = selectedMLS.has(p.mls) ? " selected" : "";
   const clickFn = exportMode ? `toggleSelectProspect('${p.mls}')` : `openProspectModal('${p.id}')`;
   return `<div class="prospect-card${sel}" onclick="${clickFn}">
@@ -261,10 +319,10 @@ function prospectCard(p) {
       <div class="card-main">
         <div class="card-name">${(p.owners || []).map(o => o.name).join(", ")}</div>
         <div class="card-addr">${p.owners?.[0]?.street || ""}, ${p.owners?.[0]?.city || ""}</div>
-        <div class="card-mls">MLS #${p.mls} · Expires ${p.expiry || "—"}</div>
+        <div class="card-mls">MLS #${p.mls} · Expires ${p.expiry || "—"} · ${municipality}</div>
       </div>
     </div>
-    <div class="card-meta">${statusBadge}<span class="badge badge-red">${p.status || "Expiré"}</span></div>
+    <div class="card-meta">${statusBadge}${typeBadge}<span class="badge badge-red">${p.status || "Expiré"}</span></div>
     <div class="card-tracking">
       <div class="track-item"><div class="track-label">Last price</div><div class="track-value">${lastPrice} ${priceDrop}</div></div>
       <div class="track-item"><div class="track-label">Mailings</div><div class="track-value">${mailings}/4</div></div>
@@ -283,6 +341,8 @@ window.openProspectModal = async function (id) {
 
 function renderProspectModal(p) {
   const fmt = n => n ? "$" + Number(n).toLocaleString("fr-CA") : "—";
+  const propType = detectPropertyType(p.listingAddress);
+  const municipality = extractMunicipality(p.listingAddress);
   const ownersHtml = (p.owners || []).map(o => `
     <div class="owner-block"><div class="on">${o.name}</div>
     <div class="oa">${o.street}<br>${o.city} &nbsp;${o.postal}</div></div>`).join("");
@@ -312,6 +372,10 @@ function renderProspectModal(p) {
       <div><div class="modal-title">${(p.owners || []).map(o => o.name).join(", ")}</div>
       <div class="modal-sub">MLS #${p.mls} · ${p.listingAddress || ""}</div></div>
       <button class="close-x" onclick="closeAllModals()">×</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      ${propType === "condo" ? '<span class="badge" style="background:#EEEDFE;color:#3C3489;">🏢 Condo</span>' : '<span class="badge" style="background:#EAF3DE;color:#2D6A4F;">🏠 House</span>'}
+      <span class="badge badge-gray">📍 ${municipality}</span>
     </div>
     <div class="detail-grid">
       <div class="detail-field"><div class="lbl">Last price</div><div class="val">${fmt(p.lastPrice)}</div></div>
@@ -420,7 +484,7 @@ function showDuplicateWarning(duplicates, onProceed, onSkip) {
     <div style="display:flex;flex-direction:column;gap:10px;">
       <button onclick="(${onSkip.toString()})()" style="padding:10px 16px;border-radius:var(--radius);border:1px solid var(--border-med);background:var(--surface);color:var(--text);font-size:13px;font-family:var(--font);cursor:pointer;text-align:left;">
         <strong>Skip duplicates</strong><br>
-        <span style="font-size:12px;color:var(--text-3);">Import only the new prospects, ignore the ${duplicates.length > 1 ? "ones" : "one"} already in the database</span>
+        <span style="font-size:12px;color:var(--text-3);">Import only new prospects, ignore the ${duplicates.length > 1 ? "ones" : "one"} already in the database</span>
       </button>
       <button onclick="(${onProceed.toString()})()" style="padding:10px 16px;border-radius:var(--radius);border:1px solid var(--border-med);background:var(--surface);color:var(--text);font-size:13px;font-family:var(--font);cursor:pointer;text-align:left;">
         <strong>Import anyway</strong><br>
@@ -430,12 +494,11 @@ function showDuplicateWarning(duplicates, onProceed, onSkip) {
         <strong>Cancel import</strong><br>
         <span style="font-size:12px;color:var(--text-3);">Go back without importing anything</span>
       </button>
-    </div>
-  `;
+    </div>`;
   openModal("prospectModal");
 }
 
-// ── Add Prospect (admin) ───────────────────────────────────
+// ── Add Prospect ───────────────────────────────────────────
 window.openAddProspect = function (tab) {
   tab = tab || "single";
   document.getElementById("addProspectContent").innerHTML = `
@@ -454,7 +517,7 @@ function singleEntryForm() {
     <div class="form-group"><label>MLS #</label><input type="text" id="ap_mls" placeholder="e.g. 9183921" /></div>
     <div class="form-group"><label>Status</label>
       <select id="ap_status"><option value="Expiré">Expiré</option><option value="Annulé">Annulé</option></select></div>
-    <div class="form-group"><label>Listing Address</label><input type="text" id="ap_listingAddr" /></div>
+    <div class="form-group"><label>Listing Address</label><input type="text" id="ap_listingAddr" placeholder="e.g. 10200 Boul. de l'Acadie, app. 814, Montréal (Ahuntsic-Cartierville)" /></div>
     <div class="form-group"><label>Contract Start</label><input type="date" id="ap_start" /></div>
     <div class="form-group"><label>Expiry Date</label><input type="date" id="ap_expiry" /></div>
     <div class="form-group"><label>Last Price ($)</label><input type="number" id="ap_price" /></div>
@@ -506,7 +569,7 @@ function bulkImportForm() {
 
 window.downloadTemplate = function() {
   const headers = "mls,status,listingAddress,contractStart,expiry,lastPrice,origPrice,prevPrice,agency,broker,brokerPhone,owner1Name,owner1Street,owner1City,owner1Postal,owner2Name,owner2Street,owner2City,owner2Postal";
-  const example = '9183921,Expiré,"10200 Boul. de Acadie app. 814 Montreal",2025-09-17,2026-03-31,540000,540000,,LES IMMEUBLES HOME-PRO,Amir Keryakes,514-943-2647,Medhat Azer,10200 Acadie app. 814,Montreal,H4N 3L3,,,,';
+  const example = '9183921,Expiré,"10200 Boul. de Acadie, app. 814, Montréal (Ahuntsic-Cartierville)",2025-09-17,2026-03-31,540000,540000,,LES IMMEUBLES HOME-PRO,Amir Keryakes,514-943-2647,Medhat Azer,10200 Acadie app. 814,Montreal,H4N 3L3,,,,';
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([headers + "\n" + example], {type:"text/csv"}));
   a.download = "prospects-template.csv"; a.click();
@@ -524,12 +587,18 @@ window.previewCSV = function(input) {
     parsedCSVRows = rows.slice(1).filter(r => r.some(c => c.trim()));
     const get = (row, col) => { const idx = headers.indexOf(col); return idx >= 0 ? (row[idx] || "").trim() : ""; };
     const preview = parsedCSVRows.map(row => {
-      const mls = get(row,"mls"); const owner = get(row,"owner1name"); const price = get(row,"lastprice");
+      const mls = get(row,"mls"); const owner = get(row,"owner1name");
+      const addr = get(row,"listingaddress"); const price = get(row,"lastprice");
       const isDup = allProspects.some(p => p.mls === mls);
-      return `<div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:10px;align-items:center;">
+      const ptype = detectPropertyType(addr);
+      const muni = extractMunicipality(addr);
+      return `<div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <span style="background:${isDup ? 'var(--amber-bg)' : 'var(--accent-light)'};color:${isDup ? 'var(--amber)' : 'var(--accent)'};padding:2px 6px;border-radius:4px;font-weight:500;white-space:nowrap;">MLS ${mls}${isDup ? ' ⚠' : ''}</span>
         <span style="flex:1;">${owner}</span>
-        <span style="color:var(--text-3);">$${Number(price).toLocaleString("fr-CA")}</span></div>`;
+        <span style="background:${ptype==='condo'?'#EEEDFE':'#EAF3DE'};color:${ptype==='condo'?'#3C3489':'#2D6A4F'};padding:2px 6px;border-radius:4px;font-size:11px;">${ptype==='condo'?'🏢':'🏠'} ${ptype}</span>
+        <span style="color:var(--text-3);font-size:11px;">📍${muni}</span>
+        <span style="color:var(--text-3);">$${Number(price).toLocaleString("fr-CA")}</span>
+      </div>`;
     }).join("");
     const dupCount = parsedCSVRows.filter(row => {
       const idx = headers.indexOf("mls"); const mls = idx >= 0 ? (row[idx]||"").trim() : "";
@@ -576,8 +645,6 @@ window.startBulkImport = function() {
   }
 };
 
-window.importCSV = window.startBulkImport;
-
 async function doImport(rows, skipDuplicates) {
   closeAllModals();
   const hdrs = ["mls","status","listingaddress","contractstart","expiry","lastprice","origprice","prevprice","agency","broker","brokerphone","owner1name","owner1street","owner1city","owner1postal","owner2name","owner2street","owner2city","owner2postal"];
@@ -606,7 +673,7 @@ async function doImport(rows, skipDuplicates) {
   if (skipped) msg += ` · ${skipped} duplicate${skipped > 1 ? "s" : ""} skipped`;
   if (failed) msg += ` · ${failed} failed`;
   showToast(msg);
-};
+}
 
 window.saveNewProspect = async function () {
   const g = id => document.getElementById(id)?.value?.trim();
@@ -617,16 +684,16 @@ window.saveNewProspect = async function () {
     e.style.display = "block"; return;
   }
   const duplicates = findDuplicates([mls]);
+  const owners = [{ name: o1name, street: g("ap_o1street"), city: g("ap_o1city"), postal: g("ap_o1postal") }];
+  if (g("ap_o2name")) owners.push({ name: g("ap_o2name"), street: g("ap_o2street"), city: g("ap_o2city"), postal: g("ap_o2postal") });
+  const formData = {
+    mls, status: g("ap_status"), listingAddress: g("ap_listingAddr"),
+    contractStart: g("ap_start"), expiry: g("ap_expiry"),
+    lastPrice: Number(g("ap_price")) || 0, origPrice: Number(g("ap_origPrice")) || 0,
+    prevPrice: g("ap_prevPrice") ? Number(g("ap_prevPrice")) : null,
+    agency: g("ap_agency"), broker: g("ap_broker"), brokerPhone: g("ap_phone"), owners
+  };
   if (duplicates.length > 0) {
-    const formData = {
-      mls, status: g("ap_status"), listingAddress: g("ap_listingAddr"),
-      contractStart: g("ap_start"), expiry: g("ap_expiry"),
-      lastPrice: Number(g("ap_price")) || 0, origPrice: Number(g("ap_origPrice")) || 0,
-      prevPrice: g("ap_prevPrice") ? Number(g("ap_prevPrice")) : null,
-      agency: g("ap_agency"), broker: g("ap_broker"), brokerPhone: g("ap_phone"),
-      owners: [{ name: o1name, street: g("ap_o1street"), city: g("ap_o1city"), postal: g("ap_o1postal") }]
-    };
-    if (g("ap_o2name")) formData.owners.push({ name: g("ap_o2name"), street: g("ap_o2street"), city: g("ap_o2city"), postal: g("ap_o2postal") });
     closeAllModals();
     showDuplicateWarning(
       duplicates,
@@ -634,9 +701,7 @@ window.saveNewProspect = async function () {
       function() { openAddProspect('single'); }
     );
   } else {
-    const owners = [{ name: o1name, street: g("ap_o1street"), city: g("ap_o1city"), postal: g("ap_o1postal") }];
-    if (g("ap_o2name")) owners.push({ name: g("ap_o2name"), street: g("ap_o2street"), city: g("ap_o2city"), postal: g("ap_o2postal") });
-    await saveSingleProspect({ mls, status: g("ap_status"), listingAddress: g("ap_listingAddr"), contractStart: g("ap_start"), expiry: g("ap_expiry"), lastPrice: Number(g("ap_price")) || 0, origPrice: Number(g("ap_origPrice")) || 0, prevPrice: g("ap_prevPrice") ? Number(g("ap_prevPrice")) : null, agency: g("ap_agency"), broker: g("ap_broker"), brokerPhone: g("ap_phone"), owners });
+    await saveSingleProspect(formData);
   }
 };
 
@@ -734,6 +799,8 @@ async function renderDashboard() {
   const el = document.getElementById("dashboardContent");
   if (!el) return;
   const totalProspects = allProspects.length;
+  const condos = allProspects.filter(p => detectPropertyType(p.listingAddress) === "condo").length;
+  const houses = allProspects.filter(p => detectPropertyType(p.listingAddress) === "house").length;
   const totalMailings = allProspects.reduce((s, p) => s + (p.mail || []).filter(Boolean).length, 0);
   const totalVisits = allProspects.reduce((s, p) => s + (p.visits || []).length, 0);
   const evalsBooked = allProspects.filter(p => (p.visits || []).some(v => v.evalBooked === "yes")).length;
@@ -776,7 +843,9 @@ async function renderDashboard() {
         </div></div>`).join("");
   el.innerHTML = `
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-label">Prospects</div><div class="stat-value">${totalProspects}</div></div>
+      <div class="stat-card"><div class="stat-label">Total prospects</div><div class="stat-value">${totalProspects}</div></div>
+      <div class="stat-card"><div class="stat-label">🏢 Condos</div><div class="stat-value">${condos}</div></div>
+      <div class="stat-card"><div class="stat-label">🏠 Houses</div><div class="stat-value">${houses}</div></div>
       <div class="stat-card"><div class="stat-label">Mailings sent</div><div class="stat-value">${totalMailings}</div></div>
       <div class="stat-card"><div class="stat-label">Door visits</div><div class="stat-value">${totalVisits}</div></div>
       <div class="stat-card"><div class="stat-label">Contacts made</div><div class="stat-value">${contacted}</div></div>
