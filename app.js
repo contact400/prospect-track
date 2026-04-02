@@ -648,6 +648,7 @@ window.downloadTemplate = function() {
 };
 
 let parsedCSVRows = [];
+window._csvRows = [];
 
 window.previewCSV = function(input) {
   const file = input.files[0]; if (!file) return;
@@ -661,6 +662,7 @@ window.previewCSV = function(input) {
       }
       const headers = rows[0].map(h => h.trim().toLowerCase());
       parsedCSVRows = rows.slice(1).filter(r => r.some(c => c.trim()));
+      window._csvRows = parsedCSVRows;
       const get = (row, col) => { const idx = headers.indexOf(col); return idx >= 0 ? (row[idx] || "").trim() : ""; };
       const preview = parsedCSVRows.map(row => {
         const mls = get(row,"mls"); const owner = get(row,"owner1name");
@@ -706,6 +708,7 @@ window.runBulkImport = async function() {
   const btn = document.getElementById("importBtn");
   try {
     if (btn) { btn.textContent = "Importing..."; btn.disabled = true; }
+const parsedCSVRows = window._csvRows || [];
     if (!parsedCSVRows || parsedCSVRows.length === 0) {
       showToast("No data to import — please upload a CSV first");
       if (btn) { btn.textContent = "Import All"; btn.disabled = false; }
