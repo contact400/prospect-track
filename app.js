@@ -15,15 +15,7 @@ let allUsers = [];
 let exportMode = false;
 let selectedMLS = new Set();
 let unsubscribeProspects = null;
-
-// Active filters state
-let activeFilters = {
-  sort: "newest",
-  mailing: "all",
-  visit: "all",
-  eval: "all",
-  status: "all"
-};
+let activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all" };
 
 onAuthStateChanged(auth, async (user) => {
   if (user) {
@@ -130,46 +122,53 @@ function updateProspectCount() {
 function renderFilterBar() {
   const bar = document.getElementById("filterBar");
   if (!bar) return;
-
+  const hasActive = activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all";
+  const isOpen = bar.dataset.open === "true";
   const btn = (label, key, val, icon) => {
     const active = activeFilters[key] === val;
-    return `<button onclick="setFilter('${key}','${val}')" style="
-      padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);
-      cursor:pointer;white-space:nowrap;border:1px solid ${active ? 'var(--accent)' : 'var(--border-med)'};
-      background:${active ? 'var(--accent)' : 'var(--surface)'};
-      color:${active ? '#fff' : 'var(--text-2)'};font-weight:${active ? '500' : '400'};
-      transition:all 0.15s;">${icon ? icon + ' ' : ''}${label}</button>`;
+    return `<button onclick="setFilter('${key}','${val}')" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;white-space:nowrap;border:1px solid ${active ? 'var(--accent)' : 'var(--border-med)'};background:${active ? 'var(--accent)' : 'var(--surface)'};color:${active ? '#fff' : 'var(--text-2)'};font-weight:${active ? '500' : '400'};transition:all 0.15s;">${icon ? icon + ' ' : ''}${label}</button>`;
   };
-
   bar.innerHTML = `
-    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);margin-bottom:16px;">
-      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:4px;">Sort</span>
-      ${btn("Newest first", "sort", "newest", "↓")}
-      ${btn("Oldest first", "sort", "oldest", "↑")}
+    <div style="margin-bottom:${isOpen ? '0' : '16px'};">
+      <button onclick="toggleFilterBar()" style="display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:99px;font-size:13px;font-family:var(--font);cursor:pointer;border:1px solid ${hasActive ? 'var(--accent)' : 'var(--border-med)'};background:${hasActive ? 'var(--accent-light)' : 'var(--surface)'};color:${hasActive ? 'var(--accent)' : 'var(--text-2)'};font-weight:${hasActive ? '500' : '400'};">
+        <span>⚙ Filters${hasActive ? ' (active)' : ''}</span>
+        <span style="font-size:10px;">${isOpen ? '▲' : '▼'}</span>
+      </button>
+    </div>
+    ${isOpen ? `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:16px;background:var(--surface);">
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Sort</span>
+      ${btn("Newest", "sort", "newest", "↓")}
+      ${btn("Oldest", "sort", "oldest", "↑")}
       ${btn("Price ↑", "sort", "price_asc", "")}
       ${btn("Price ↓", "sort", "price_desc", "")}
-      <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
-      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:4px;">Mailers</span>
+      <span style="width:1px;height:20px;background:var(--border);margin:0 2px;"></span>
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Mailers</span>
       ${btn("All", "mailing", "all", "")}
       ${btn("None sent", "mailing", "none", "✉️")}
       ${btn("1–3 sent", "mailing", "partial", "")}
       ${btn("All 4 sent", "mailing", "complete", "✅")}
-      <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
-      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:4px;">Visits</span>
+      <span style="width:1px;height:20px;background:var(--border);margin:0 2px;"></span>
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Visits</span>
       ${btn("All", "visit", "all", "")}
       ${btn("Not visited", "visit", "none", "")}
       ${btn("Visited", "visit", "some", "🚪")}
-      <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
-      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:4px;">Status</span>
+      <span style="width:1px;height:20px;background:var(--border);margin:0 2px;"></span>
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Status</span>
       ${btn("All", "eval", "all", "")}
       ${btn("Eval booked", "eval", "booked", "📅")}
       ${btn("Contacted", "eval", "contacted", "☎️")}
       ${btn("No contact", "eval", "none", "")}
-      ${activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all"
-        ? `<button onclick="resetFilters()" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;border:1px solid var(--red-bg);background:var(--red-bg);color:var(--red);font-weight:500;">✕ Reset</button>`
-        : ""}
-    </div>`;
+      ${hasActive ? `<button onclick="resetFilters()" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;border:1px solid var(--red-bg);background:var(--red-bg);color:var(--red);font-weight:500;">✕ Reset</button>` : ""}
+    </div>` : ""}
+  `;
 }
+
+window.toggleFilterBar = function() {
+  const bar = document.getElementById("filterBar");
+  bar.dataset.open = bar.dataset.open === "true" ? "false" : "true";
+  renderFilterBar();
+};
 
 window.setFilter = function(key, val) {
   activeFilters[key] = val;
@@ -178,7 +177,7 @@ window.setFilter = function(key, val) {
 };
 
 window.resetFilters = function() {
-  activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all", status: "all" };
+  activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all" };
   renderFilterBar();
   renderProspects();
 };
@@ -186,16 +185,12 @@ window.resetFilters = function() {
 function getFilteredAndSorted() {
   const q = document.getElementById("searchInput").value.toLowerCase();
   let list = [...allProspects];
-
-  // Search
   if (q) {
     list = list.filter(p => {
       const names = (p.owners || []).map(o => o.name).join(" ").toLowerCase();
       return p.mls?.includes(q) || p.listingAddress?.toLowerCase().includes(q) || names.includes(q);
     });
   }
-
-  // Mailing filter
   if (activeFilters.mailing !== "all") {
     list = list.filter(p => {
       const sent = (p.mail || []).filter(Boolean).length;
@@ -204,8 +199,6 @@ function getFilteredAndSorted() {
       if (activeFilters.mailing === "complete") return sent === 4;
     });
   }
-
-  // Visit filter
   if (activeFilters.visit !== "all") {
     list = list.filter(p => {
       const visits = (p.visits || []).length;
@@ -213,8 +206,6 @@ function getFilteredAndSorted() {
       if (activeFilters.visit === "some") return visits > 0;
     });
   }
-
-  // Eval/contact filter
   if (activeFilters.eval !== "all") {
     list = list.filter(p => {
       const evalBooked = (p.visits || []).some(v => v.evalBooked === "yes");
@@ -224,8 +215,6 @@ function getFilteredAndSorted() {
       if (activeFilters.eval === "none") return !contacted && !evalBooked;
     });
   }
-
-  // Sort
   list.sort((a, b) => {
     if (activeFilters.sort === "newest") return (b.expiry || "").localeCompare(a.expiry || "");
     if (activeFilters.sort === "oldest") return (a.expiry || "").localeCompare(b.expiry || "");
@@ -233,7 +222,6 @@ function getFilteredAndSorted() {
     if (activeFilters.sort === "price_desc") return (b.lastPrice || 0) - (a.lastPrice || 0);
     return 0;
   });
-
   return list;
 }
 
@@ -241,11 +229,11 @@ window.renderProspects = function () {
   renderFilterBar();
   const filtered = getFilteredAndSorted();
   const container = document.getElementById("prospectsContainer");
+  const hasActive = activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all";
   if (!filtered.length) {
-    const hasFilters = activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all";
     container.innerHTML = `<div class="empty-state"><div class="empty-icon">◎</div>
-      <div class="empty-title">${hasFilters ? "No prospects match these filters" : "No prospects found"}</div>
-      <div class="empty-sub">${hasFilters ? '<button onclick="resetFilters()" style="margin-top:8px;padding:6px 14px;border-radius:99px;background:var(--accent);color:#fff;border:none;font-size:13px;cursor:pointer;">Reset filters</button>' : allProspects.length === 0 && isAdmin ? "Add your first prospect using the button above." : "Try a different search."}</div>
+      <div class="empty-title">${hasActive ? "No prospects match these filters" : "No prospects found"}</div>
+      <div class="empty-sub">${hasActive ? '<button onclick="resetFilters()" style="margin-top:8px;padding:6px 14px;border-radius:99px;background:var(--accent);color:#fff;border:none;font-size:13px;cursor:pointer;">Reset filters</button>' : allProspects.length === 0 && isAdmin ? "Add your first prospect using the button above." : "Try a different search."}</div>
     </div>`;
     return;
   }
