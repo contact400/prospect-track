@@ -18,6 +18,11 @@ let unsubscribeProspects = null;
 let activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all", type: "all" };
 let selectedMunicipalities = new Set();
 
+// Duplicate resolution state
+let pendingImportRows = [];
+let pendingImportSkip = false;
+let pendingSingleData = null;
+
 function detectPropertyType(address) {
   if (!address) return "house";
   const a = address.toLowerCase();
@@ -138,6 +143,7 @@ function updateProspectCount() {
     `${allProspects.length} expired listing${allProspects.length !== 1 ? "s" : ""}`;
 }
 
+// ── Filters ────────────────────────────────────────────────
 function renderFilterBar() {
   const bar = document.getElementById("filterBar");
   if (!bar) return;
@@ -154,7 +160,7 @@ function renderFilterBar() {
   const municipalities = getMunicipalities();
   const muniButtons = municipalities.map(m => {
     const active = selectedMunicipalities.has(m);
-    return `<button onclick="toggleMunicipality('${m}')" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;white-space:nowrap;border:1px solid ${active ? 'var(--accent)' : 'var(--border-med)'};background:${active ? 'var(--accent)' : 'var(--surface)'};color:${active ? '#fff' : 'var(--text-2)'};font-weight:${active ? '500' : '400'};transition:all 0.15s;">${active ? '✓ ' : ''}${m}</button>`;
+    return `<button onclick="toggleMunicipality('${m.replace(/'/g, "\\'")}')" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;white-space:nowrap;border:1px solid ${active ? 'var(--accent)' : 'var(--border-med)'};background:${active ? 'var(--accent)' : 'var(--surface)'};color:${active ? '#fff' : 'var(--text-2)'};font-weight:${active ? '500' : '400'};transition:all 0.15s;">${active ? '✓ ' : ''}${m}</button>`;
   }).join("");
 
   bar.innerHTML = `
@@ -169,7 +175,6 @@ function renderFilterBar() {
       </button>
       ${hasFilters || hasMuni ? `<button onclick="resetAll()" style="padding:7px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;border:1px solid var(--red-bg);background:var(--red-bg);color:var(--red);font-weight:500;">✕ Reset all</button>` : ""}
     </div>
-
     ${isFilterOpen ? `
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:10px;background:var(--surface);">
       <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Type</span>
@@ -200,7 +205,6 @@ function renderFilterBar() {
       ${btn("Contacted", "eval", "contacted", "☎️")}
       ${btn("No contact", "eval", "none", "")}
     </div>` : ""}
-
     ${isMuniOpen ? `
     <div style="padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:10px;background:var(--surface);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
@@ -208,12 +212,9 @@ function renderFilterBar() {
         ${selectedMunicipalities.size > 0 ? `<button onclick="clearMunicipalities()" style="font-size:11px;color:var(--red);background:none;border:none;cursor:pointer;">Clear all</button>` : ""}
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        ${municipalities.length === 0
-          ? '<span style="font-size:13px;color:var(--text-3);">No municipalities found — add prospects first.</span>'
-          : muniButtons}
+        ${municipalities.length === 0 ? '<span style="font-size:13px;color:var(--text-3);">No municipalities found — add prospects first.</span>' : muniButtons}
       </div>
     </div>` : ""}
-
     ${isFilterOpen || isMuniOpen ? '<div style="margin-bottom:16px;"></div>' : ""}
   `;
 }
@@ -271,12 +272,8 @@ function getFilteredAndSorted() {
       return p.mls?.includes(q) || p.listingAddress?.toLowerCase().includes(q) || names.includes(q);
     });
   }
-  if (activeFilters.type !== "all") {
-    list = list.filter(p => detectPropertyType(p.listingAddress) === activeFilters.type);
-  }
-  if (selectedMunicipalities.size > 0) {
-    list = list.filter(p => selectedMunicipalities.has(extractMunicipality(p.listingAddress)));
-  }
+  if (activeFilters.type !== "all") list = list.filter(p => detectPropertyType(p.listingAddress) === activeFilters.type);
+  if (selectedMunicipalities.size > 0) list = list.filter(p => selectedMunicipalities.has(extractMunicipality(p.listingAddress)));
   if (activeFilters.mailing !== "all") {
     list = list.filter(p => {
       const sent = (p.mail || []).filter(Boolean).length;
@@ -336,8 +333,7 @@ function prospectCard(p) {
   const contacted = (p.visits || []).some(v => v.contact === "yes");
   const propType = detectPropertyType(p.listingAddress);
   const municipality = extractMunicipality(p.listingAddress);
-  const statusBadge = evalBooked
-    ? `<span class="badge badge-green">Eval booked</span>`
+  const statusBadge = evalBooked ? `<span class="badge badge-green">Eval booked</span>`
     : contacted ? `<span class="badge badge-blue">Contacted</span>`
     : mailings > 0 ? `<span class="badge badge-amber">${mailings} mailing${mailings > 1 ? "s" : ""} sent</span>`
     : `<span class="badge badge-gray">Not contacted</span>`;
@@ -490,11 +486,12 @@ async function logActivity(prospectId, action) {
   });
 }
 
+// ── Duplicate handling ─────────────────────────────────────
 function findDuplicates(mlsList) {
   return mlsList.filter(mls => allProspects.some(p => p.mls === mls));
 }
 
-function showDuplicateWarning(duplicates, onProceed, onSkip) {
+function showDuplicateWarning(duplicates) {
   const dupList = duplicates.map(mls => {
     const existing = allProspects.find(p => p.mls === mls);
     return `<div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:10px;align-items:center;">
@@ -514,22 +511,38 @@ function showDuplicateWarning(duplicates, onProceed, onSkip) {
     <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px;">${dupList}</div>
     <p style="font-size:13px;color:var(--text-2);margin-bottom:16px;">What would you like to do?</p>
     <div style="display:flex;flex-direction:column;gap:10px;">
-      <button onclick="(${onSkip.toString()})()" style="padding:10px 16px;border-radius:var(--radius);border:1px solid var(--border-med);background:var(--surface);color:var(--text);font-size:13px;font-family:var(--font);cursor:pointer;text-align:left;">
+      <button onclick="resolveDuplicate('skip')" style="padding:10px 16px;border-radius:var(--radius);border:1px solid var(--border-med);background:var(--surface);color:var(--text);font-size:13px;font-family:var(--font);cursor:pointer;text-align:left;">
         <strong>Skip duplicates</strong><br>
         <span style="font-size:12px;color:var(--text-3);">Import only new prospects, ignore the ${duplicates.length > 1 ? "ones" : "one"} already in the database</span>
       </button>
-      <button onclick="(${onProceed.toString()})()" style="padding:10px 16px;border-radius:var(--radius);border:1px solid var(--border-med);background:var(--surface);color:var(--text);font-size:13px;font-family:var(--font);cursor:pointer;text-align:left;">
+      <button onclick="resolveDuplicate('import')" style="padding:10px 16px;border-radius:var(--radius);border:1px solid var(--border-med);background:var(--surface);color:var(--text);font-size:13px;font-family:var(--font);cursor:pointer;text-align:left;">
         <strong>Import anyway</strong><br>
         <span style="font-size:12px;color:var(--text-3);">Add all prospects including duplicates</span>
       </button>
       <button onclick="closeAllModals()" style="padding:10px 16px;border-radius:var(--radius);border:1px solid var(--border-med);background:var(--surface);color:var(--red);font-size:13px;font-family:var(--font);cursor:pointer;text-align:left;">
-        <strong>Cancel import</strong><br>
+        <strong>Cancel</strong><br>
         <span style="font-size:12px;color:var(--text-3);">Go back without importing anything</span>
       </button>
     </div>`;
   openModal("prospectModal");
 }
 
+window.resolveDuplicate = async function(choice) {
+  closeAllModals();
+  if (pendingSingleData) {
+    if (choice === 'import') {
+      await saveSingleProspect(pendingSingleData);
+    } else {
+      showToast("Import cancelled — prospect already exists");
+    }
+    pendingSingleData = null;
+  } else if (pendingImportRows.length > 0) {
+    await doImport(pendingImportRows, choice === 'skip');
+    pendingImportRows = [];
+  }
+};
+
+// ── Add Prospect ───────────────────────────────────────────
 window.openAddProspect = function (tab) {
   tab = tab || "single";
   document.getElementById("addProspectContent").innerHTML = `
@@ -665,19 +678,16 @@ window.startBulkImport = function() {
   const mlsList = parsedCSVRows.map(row => get(row, "mls")).filter(Boolean);
   const duplicates = findDuplicates(mlsList);
   if (duplicates.length > 0) {
+    pendingImportRows = parsedCSVRows;
+    pendingSingleData = null;
     closeAllModals();
-    showDuplicateWarning(
-      duplicates,
-      async function() { await doImport(parsedCSVRows, false); },
-      async function() { await doImport(parsedCSVRows, true); }
-    );
+    showDuplicateWarning(duplicates);
   } else {
     doImport(parsedCSVRows, false);
   }
 };
 
 async function doImport(rows, skipDuplicates) {
-  closeAllModals();
   const hdrs = ["mls","status","listingaddress","contractstart","expiry","lastprice","origprice","prevprice","agency","broker","brokerphone","owner1name","owner1street","owner1city","owner1postal","owner2name","owner2street","owner2city","owner2postal"];
   let imported = 0; let skipped = 0; let failed = 0;
   for (const row of rows) {
@@ -725,12 +735,10 @@ window.saveNewProspect = async function () {
   };
   const duplicates = findDuplicates([mls]);
   if (duplicates.length > 0) {
+    pendingSingleData = formData;
+    pendingImportRows = [];
     closeAllModals();
-    showDuplicateWarning(
-      duplicates,
-      async function() { await saveSingleProspect(formData); },
-      function() { openAddProspect('single'); }
-    );
+    showDuplicateWarning(duplicates);
   } else {
     await saveSingleProspect(formData);
   }
