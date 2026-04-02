@@ -338,7 +338,7 @@ async function logActivity(prospectId, action) {
 }
 
 // ── Add Prospect (admin) ───────────────────────────────────
-window.openAddProspect = function () {
+window.openAddProspect = function (tab) {
   document.getElementById("addProspectContent").innerHTML = `
     <div class="modal-header">
       <div class="modal-title">Add Prospect</div>
