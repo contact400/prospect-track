@@ -528,17 +528,20 @@ function showDuplicateWarning(duplicates) {
 }
 
 window.resolveDuplicate = async function(choice) {
-  closeAllModals();
+  document.getElementById("modalOverlay").classList.remove("open");
+  document.querySelectorAll(".modal").forEach(m => m.classList.remove("active"));
   if (pendingSingleData) {
-    if (choice === 'import') {
-      await saveSingleProspect(pendingSingleData);
-    } else {
-      showToast("Import cancelled — prospect already exists");
-    }
+    const data = pendingSingleData;
     pendingSingleData = null;
+    if (choice === 'import') {
+      await saveSingleProspect(data);
+    } else {
+      showToast("Skipped — prospect already exists");
+    }
   } else if (pendingImportRows.length > 0) {
-    await doImport(pendingImportRows, choice === 'skip');
+    const rows = [...pendingImportRows];
     pendingImportRows = [];
+    await doImport(rows, choice === 'skip');
   }
 };
 
