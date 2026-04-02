@@ -393,6 +393,49 @@ async function logActivity(prospectId, action) {
   });
 }
 
+// ── Duplicate check ────────────────────────────────────────
+function findDuplicates(mlsList) {
+  return mlsList.filter(mls => allProspects.some(p => p.mls === mls));
+}
+
+function showDuplicateWarning(duplicates, onProceed, onSkip) {
+  const dupList = duplicates.map(mls => {
+    const existing = allProspects.find(p => p.mls === mls);
+    return `<div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:10px;align-items:center;">
+      <span style="background:var(--amber-bg);color:var(--amber);padding:2px 6px;border-radius:4px;font-weight:500;white-space:nowrap;">MLS ${mls}</span>
+      <span style="flex:1;">${(existing?.owners||[]).map(o=>o.name).join(", ")}</span>
+    </div>`;
+  }).join("");
+  document.getElementById("prospectModalContent").innerHTML = `
+    <div class="modal-header">
+      <div><div class="modal-title">Duplicate${duplicates.length > 1 ? "s" : ""} found</div>
+      <div class="modal-sub">${duplicates.length} MLS number${duplicates.length > 1 ? "s" : ""} already exist${duplicates.length === 1 ? "s" : ""} in your database</div></div>
+      <button class="close-x" onclick="closeAllModals()">×</button>
+    </div>
+    <div style="background:var(--amber-bg);border-radius:var(--radius);padding:12px 14px;margin-bottom:14px;">
+      <p style="font-size:13px;color:var(--amber);font-weight:500;">The following prospects are already in your database:</p>
+    </div>
+    <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px;">${dupList}</div>
+    <p style="font-size:13px;color:var(--text-2);margin-bottom:16px;">What would you like to do with the duplicate${duplicates.length > 1 ? "s" : ""}?</p>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button onclick="(${onSkip.toString()})()" style="padding:10px 16px;border-radius:var(--radius);border:1px solid var(--border-med);background:var(--surface);color:var(--text);font-size:13px;font-family:var(--font);cursor:pointer;text-align:left;">
+        <strong>Skip duplicates</strong><br>
+        <span style="font-size:12px;color:var(--text-3);">Import only the new prospects, ignore the ${duplicates.length > 1 ? "ones" : "one"} already in the database</span>
+      </button>
+      <button onclick="(${onProceed.toString()})()" style="padding:10px 16px;border-radius:var(--radius);border:1px solid var(--border-med);background:var(--surface);color:var(--text);font-size:13px;font-family:var(--font);cursor:pointer;text-align:left;">
+        <strong>Import anyway</strong><br>
+        <span style="font-size:12px;color:var(--text-3);">Add all prospects including duplicates</span>
+      </button>
+      <button onclick="closeAllModals()" style="padding:10px 16px;border-radius:var(--radius);border:1px solid var(--border-med);background:var(--surface);color:var(--red);font-size:13px;font-family:var(--font);cursor:pointer;text-align:left;">
+        <strong>Cancel import</strong><br>
+        <span style="font-size:12px;color:var(--text-3);">Go back without importing anything</span>
+      </button>
+    </div>
+  `;
+  openModal("prospectModal");
+}
+
+// ── Add Prospect (admin) ───────────────────────────────────
 window.openAddProspect = function (tab) {
   tab = tab || "single";
   document.getElementById("addProspectContent").innerHTML = `
@@ -457,7 +500,7 @@ function bulkImportForm() {
     <div id="ap_error" class="error-msg" style="display:none;margin-top:8px;"></div>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="closeAllModals()">Cancel</button>
-      <button class="btn-primary" id="importBtn" style="width:auto;padding:9px 20px;display:none;" onclick="importCSV()">Import All</button>
+      <button class="btn-primary" id="importBtn" style="width:auto;padding:9px 20px;display:none;" onclick="startBulkImport()">Import All</button>
     </div>`;
 }
 
@@ -482,12 +525,17 @@ window.previewCSV = function(input) {
     const get = (row, col) => { const idx = headers.indexOf(col); return idx >= 0 ? (row[idx] || "").trim() : ""; };
     const preview = parsedCSVRows.map(row => {
       const mls = get(row,"mls"); const owner = get(row,"owner1name"); const price = get(row,"lastprice");
+      const isDup = allProspects.some(p => p.mls === mls);
       return `<div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:10px;align-items:center;">
-        <span style="background:var(--accent-light);color:var(--accent);padding:2px 6px;border-radius:4px;font-weight:500;white-space:nowrap;">MLS ${mls}</span>
+        <span style="background:${isDup ? 'var(--amber-bg)' : 'var(--accent-light)'};color:${isDup ? 'var(--amber)' : 'var(--accent)'};padding:2px 6px;border-radius:4px;font-weight:500;white-space:nowrap;">MLS ${mls}${isDup ? ' ⚠' : ''}</span>
         <span style="flex:1;">${owner}</span>
         <span style="color:var(--text-3);">$${Number(price).toLocaleString("fr-CA")}</span></div>`;
     }).join("");
-    document.getElementById("csvPreviewLabel").textContent = parsedCSVRows.length + " prospect(s) ready to import";
+    const dupCount = parsedCSVRows.filter(row => {
+      const idx = headers.indexOf("mls"); const mls = idx >= 0 ? (row[idx]||"").trim() : "";
+      return allProspects.some(p => p.mls === mls);
+    }).length;
+    document.getElementById("csvPreviewLabel").textContent = parsedCSVRows.length + " prospect(s) ready to import" + (dupCount > 0 ? ` · ⚠ ${dupCount} duplicate${dupCount > 1 ? "s" : ""} detected` : "");
     document.getElementById("csvPreviewList").innerHTML = preview;
     document.getElementById("csvPreview").style.display = "block";
     document.getElementById("importBtn").style.display = "block";
@@ -511,19 +559,39 @@ function parseCSV(text) {
   return rows;
 }
 
-window.importCSV = async function() {
-  const btn = document.getElementById("importBtn");
-  btn.textContent = "Importing..."; btn.disabled = true;
+window.startBulkImport = function() {
   const hdrs = ["mls","status","listingaddress","contractstart","expiry","lastprice","origprice","prevprice","agency","broker","brokerphone","owner1name","owner1street","owner1city","owner1postal","owner2name","owner2street","owner2city","owner2postal"];
-  let imported = 0; let failed = 0;
-  for (const row of parsedCSVRows) {
+  const get = (row, col) => { const i = hdrs.indexOf(col); return i >= 0 ? (row[i]||"").trim() : ""; };
+  const mlsList = parsedCSVRows.map(row => get(row, "mls")).filter(Boolean);
+  const duplicates = findDuplicates(mlsList);
+  if (duplicates.length > 0) {
+    closeAllModals();
+    showDuplicateWarning(
+      duplicates,
+      async function() { await doImport(parsedCSVRows, false); },
+      async function() { await doImport(parsedCSVRows, true); }
+    );
+  } else {
+    doImport(parsedCSVRows, false);
+  }
+};
+
+window.importCSV = window.startBulkImport;
+
+async function doImport(rows, skipDuplicates) {
+  closeAllModals();
+  const hdrs = ["mls","status","listingaddress","contractstart","expiry","lastprice","origprice","prevprice","agency","broker","brokerphone","owner1name","owner1street","owner1city","owner1postal","owner2name","owner2street","owner2city","owner2postal"];
+  let imported = 0; let skipped = 0; let failed = 0;
+  for (const row of rows) {
     try {
       const get = col => { const i = hdrs.indexOf(col); return i >= 0 ? (row[i]||"").trim() : ""; };
-      if (!get("mls") || !get("owner1name")) { failed++; continue; }
+      const mls = get("mls");
+      if (!mls || !get("owner1name")) { failed++; continue; }
+      if (skipDuplicates && allProspects.some(p => p.mls === mls)) { skipped++; continue; }
       const owners = [{name:get("owner1name"),street:get("owner1street"),city:get("owner1city"),postal:get("owner1postal")}];
       if (get("owner2name")) owners.push({name:get("owner2name"),street:get("owner2street"),city:get("owner2city"),postal:get("owner2postal")});
       await addDoc(collection(db,"prospects"), {
-        mls:get("mls"), status:get("status")||"Expiré", listingAddress:get("listingaddress"),
+        mls, status:get("status")||"Expiré", listingAddress:get("listingaddress"),
         contractStart:get("contractstart"), expiry:get("expiry"),
         lastPrice:Number(get("lastprice"))||0, origPrice:Number(get("origprice"))||0,
         prevPrice:get("prevprice")?Number(get("prevprice")):null,
@@ -534,8 +602,10 @@ window.importCSV = async function() {
       imported++;
     } catch(e) { failed++; }
   }
-  closeAllModals();
-  showToast("Imported " + imported + " prospect(s)" + (failed ? " · " + failed + " skipped" : ""));
+  let msg = `Imported ${imported} prospect(s)`;
+  if (skipped) msg += ` · ${skipped} duplicate${skipped > 1 ? "s" : ""} skipped`;
+  if (failed) msg += ` · ${failed} failed`;
+  showToast(msg);
 };
 
 window.saveNewProspect = async function () {
@@ -546,20 +616,38 @@ window.saveNewProspect = async function () {
     e.textContent = "MLS # and at least one owner name are required.";
     e.style.display = "block"; return;
   }
-  const owners = [{ name: o1name, street: g("ap_o1street"), city: g("ap_o1city"), postal: g("ap_o1postal") }];
-  if (g("ap_o2name")) owners.push({ name: g("ap_o2name"), street: g("ap_o2street"), city: g("ap_o2city"), postal: g("ap_o2postal") });
+  const duplicates = findDuplicates([mls]);
+  if (duplicates.length > 0) {
+    const formData = {
+      mls, status: g("ap_status"), listingAddress: g("ap_listingAddr"),
+      contractStart: g("ap_start"), expiry: g("ap_expiry"),
+      lastPrice: Number(g("ap_price")) || 0, origPrice: Number(g("ap_origPrice")) || 0,
+      prevPrice: g("ap_prevPrice") ? Number(g("ap_prevPrice")) : null,
+      agency: g("ap_agency"), broker: g("ap_broker"), brokerPhone: g("ap_phone"),
+      owners: [{ name: o1name, street: g("ap_o1street"), city: g("ap_o1city"), postal: g("ap_o1postal") }]
+    };
+    if (g("ap_o2name")) formData.owners.push({ name: g("ap_o2name"), street: g("ap_o2street"), city: g("ap_o2city"), postal: g("ap_o2postal") });
+    closeAllModals();
+    showDuplicateWarning(
+      duplicates,
+      async function() { await saveSingleProspect(formData); },
+      function() { openAddProspect('single'); }
+    );
+  } else {
+    const owners = [{ name: o1name, street: g("ap_o1street"), city: g("ap_o1city"), postal: g("ap_o1postal") }];
+    if (g("ap_o2name")) owners.push({ name: g("ap_o2name"), street: g("ap_o2street"), city: g("ap_o2city"), postal: g("ap_o2postal") });
+    await saveSingleProspect({ mls, status: g("ap_status"), listingAddress: g("ap_listingAddr"), contractStart: g("ap_start"), expiry: g("ap_expiry"), lastPrice: Number(g("ap_price")) || 0, origPrice: Number(g("ap_origPrice")) || 0, prevPrice: g("ap_prevPrice") ? Number(g("ap_prevPrice")) : null, agency: g("ap_agency"), broker: g("ap_broker"), brokerPhone: g("ap_phone"), owners });
+  }
+};
+
+async function saveSingleProspect(data) {
   await addDoc(collection(db, "prospects"), {
-    mls, status: g("ap_status"), listingAddress: g("ap_listingAddr"),
-    contractStart: g("ap_start"), expiry: g("ap_expiry"),
-    lastPrice: Number(g("ap_price")) || 0, origPrice: Number(g("ap_origPrice")) || 0,
-    prevPrice: g("ap_prevPrice") ? Number(g("ap_prevPrice")) : null,
-    agency: g("ap_agency"), broker: g("ap_broker"), brokerPhone: g("ap_phone"),
-    owners, mail: ["","","",""], visits: [],
+    ...data, mail: ["","","",""], visits: [],
     createdAt: serverTimestamp(), createdBy: currentUser.uid
   });
   closeAllModals();
   showToast("Prospect added successfully");
-};
+}
 
 window.deleteProspect = async function (id) {
   if (!confirm("Delete this prospect? This cannot be undone.")) return;
