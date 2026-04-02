@@ -3,8 +3,8 @@ import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
-  collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc,
-  onSnapshot, query, orderBy, serverTimestamp, deleteDoc
+  collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc,
+  onSnapshot, query, orderBy, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 let currentUser = null;
@@ -16,15 +16,22 @@ let exportMode = false;
 let selectedMLS = new Set();
 let unsubscribeProspects = null;
 
+// Active filters state
+let activeFilters = {
+  sort: "newest",
+  mailing: "all",
+  visit: "all",
+  eval: "all",
+  status: "all"
+};
+
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     currentUser = user;
     await loadUserProfile(user.uid);
     showApp();
   } else {
-    currentUser = null;
-    currentUserProfile = null;
-    isAdmin = false;
+    currentUser = null; currentUserProfile = null; isAdmin = false;
     showLogin();
   }
 });
@@ -42,16 +49,12 @@ window.handleLogin = async function () {
   const password = document.getElementById("loginPassword").value;
   const btn = document.getElementById("loginBtn");
   const err = document.getElementById("loginError");
-  err.style.display = "none";
-  btn.textContent = "Signing in...";
-  btn.disabled = true;
+  err.style.display = "none"; btn.textContent = "Signing in..."; btn.disabled = true;
   try {
     await signInWithEmailAndPassword(auth, email, password);
   } catch (e) {
     err.textContent = "Invalid email or password. Please try again.";
-    err.style.display = "block";
-    btn.textContent = "Sign in";
-    btn.disabled = false;
+    err.style.display = "block"; btn.textContent = "Sign in"; btn.disabled = false;
   }
 };
 
@@ -72,10 +75,7 @@ function showApp() {
   document.getElementById("appScreen").classList.add("active");
   setupRoleUI();
   subscribeToProspects();
-  if (isAdmin) {
-    loadAllUsers();
-    renderDashboard();
-  }
+  if (isAdmin) { loadAllUsers(); renderDashboard(); }
 }
 
 function setupRoleUI() {
@@ -96,9 +96,7 @@ window.switchView = function (name, el) {
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
   document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
   document.getElementById(`view-${name}`).classList.add("active");
-  if (el) {
-    document.querySelectorAll(`[data-view="${name}"]`).forEach(n => n.classList.add("active"));
-  }
+  if (el) document.querySelectorAll(`[data-view="${name}"]`).forEach(n => n.classList.add("active"));
   document.getElementById("mobileTitle").textContent =
     name === "prospects" ? "Prospects" : name === "dashboard" ? "Dashboard" : "Admin";
   if (name === "dashboard") renderDashboard();
@@ -128,16 +126,127 @@ function updateProspectCount() {
     `${allProspects.length} expired listing${allProspects.length !== 1 ? "s" : ""}`;
 }
 
-window.renderProspects = function () {
+// ── Filters ────────────────────────────────────────────────
+function renderFilterBar() {
+  const bar = document.getElementById("filterBar");
+  if (!bar) return;
+
+  const btn = (label, key, val, icon) => {
+    const active = activeFilters[key] === val;
+    return `<button onclick="setFilter('${key}','${val}')" style="
+      padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);
+      cursor:pointer;white-space:nowrap;border:1px solid ${active ? 'var(--accent)' : 'var(--border-med)'};
+      background:${active ? 'var(--accent)' : 'var(--surface)'};
+      color:${active ? '#fff' : 'var(--text-2)'};font-weight:${active ? '500' : '400'};
+      transition:all 0.15s;">${icon ? icon + ' ' : ''}${label}</button>`;
+  };
+
+  bar.innerHTML = `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);margin-bottom:16px;">
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:4px;">Sort</span>
+      ${btn("Newest first", "sort", "newest", "↓")}
+      ${btn("Oldest first", "sort", "oldest", "↑")}
+      ${btn("Price ↑", "sort", "price_asc", "")}
+      ${btn("Price ↓", "sort", "price_desc", "")}
+      <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:4px;">Mailers</span>
+      ${btn("All", "mailing", "all", "")}
+      ${btn("None sent", "mailing", "none", "✉️")}
+      ${btn("1–3 sent", "mailing", "partial", "")}
+      ${btn("All 4 sent", "mailing", "complete", "✅")}
+      <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:4px;">Visits</span>
+      ${btn("All", "visit", "all", "")}
+      ${btn("Not visited", "visit", "none", "")}
+      ${btn("Visited", "visit", "some", "🚪")}
+      <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:4px;">Status</span>
+      ${btn("All", "eval", "all", "")}
+      ${btn("Eval booked", "eval", "booked", "📅")}
+      ${btn("Contacted", "eval", "contacted", "☎️")}
+      ${btn("No contact", "eval", "none", "")}
+      ${activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all"
+        ? `<button onclick="resetFilters()" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;border:1px solid var(--red-bg);background:var(--red-bg);color:var(--red);font-weight:500;">✕ Reset</button>`
+        : ""}
+    </div>`;
+}
+
+window.setFilter = function(key, val) {
+  activeFilters[key] = val;
+  renderFilterBar();
+  renderProspects();
+};
+
+window.resetFilters = function() {
+  activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all", status: "all" };
+  renderFilterBar();
+  renderProspects();
+};
+
+function getFilteredAndSorted() {
   const q = document.getElementById("searchInput").value.toLowerCase();
-  const filtered = allProspects.filter(p => {
-    if (!q) return true;
-    const names = (p.owners || []).map(o => o.name).join(" ").toLowerCase();
-    return p.mls?.includes(q) || p.listingAddress?.toLowerCase().includes(q) || names.includes(q);
+  let list = [...allProspects];
+
+  // Search
+  if (q) {
+    list = list.filter(p => {
+      const names = (p.owners || []).map(o => o.name).join(" ").toLowerCase();
+      return p.mls?.includes(q) || p.listingAddress?.toLowerCase().includes(q) || names.includes(q);
+    });
+  }
+
+  // Mailing filter
+  if (activeFilters.mailing !== "all") {
+    list = list.filter(p => {
+      const sent = (p.mail || []).filter(Boolean).length;
+      if (activeFilters.mailing === "none") return sent === 0;
+      if (activeFilters.mailing === "partial") return sent >= 1 && sent <= 3;
+      if (activeFilters.mailing === "complete") return sent === 4;
+    });
+  }
+
+  // Visit filter
+  if (activeFilters.visit !== "all") {
+    list = list.filter(p => {
+      const visits = (p.visits || []).length;
+      if (activeFilters.visit === "none") return visits === 0;
+      if (activeFilters.visit === "some") return visits > 0;
+    });
+  }
+
+  // Eval/contact filter
+  if (activeFilters.eval !== "all") {
+    list = list.filter(p => {
+      const evalBooked = (p.visits || []).some(v => v.evalBooked === "yes");
+      const contacted = (p.visits || []).some(v => v.contact === "yes");
+      if (activeFilters.eval === "booked") return evalBooked;
+      if (activeFilters.eval === "contacted") return contacted && !evalBooked;
+      if (activeFilters.eval === "none") return !contacted && !evalBooked;
+    });
+  }
+
+  // Sort
+  list.sort((a, b) => {
+    if (activeFilters.sort === "newest") return (b.expiry || "").localeCompare(a.expiry || "");
+    if (activeFilters.sort === "oldest") return (a.expiry || "").localeCompare(b.expiry || "");
+    if (activeFilters.sort === "price_asc") return (a.lastPrice || 0) - (b.lastPrice || 0);
+    if (activeFilters.sort === "price_desc") return (b.lastPrice || 0) - (a.lastPrice || 0);
+    return 0;
   });
+
+  return list;
+}
+
+window.renderProspects = function () {
+  renderFilterBar();
+  const filtered = getFilteredAndSorted();
   const container = document.getElementById("prospectsContainer");
   if (!filtered.length) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">◎</div><div class="empty-title">No prospects found</div><div class="empty-sub">${allProspects.length === 0 && isAdmin ? 'Add your first prospect using the button above.' : 'Try a different search.'}</div></div>`;
+    const hasFilters = activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all";
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">◎</div>
+      <div class="empty-title">${hasFilters ? "No prospects match these filters" : "No prospects found"}</div>
+      <div class="empty-sub">${hasFilters ? '<button onclick="resetFilters()" style="margin-top:8px;padding:6px 14px;border-radius:99px;background:var(--accent);color:#fff;border:none;font-size:13px;cursor:pointer;">Reset filters</button>' : allProspects.length === 0 && isAdmin ? "Add your first prospect using the button above." : "Try a different search."}</div>
+    </div>`;
     return;
   }
   container.innerHTML = `<div class="prospects-grid">${filtered.map(p => prospectCard(p)).join("")}</div>`;
@@ -153,10 +262,8 @@ function prospectCard(p) {
   const contacted = (p.visits || []).some(v => v.contact === "yes");
   const statusBadge = evalBooked
     ? `<span class="badge badge-green">Eval booked</span>`
-    : contacted
-    ? `<span class="badge badge-blue">Contacted</span>`
-    : mailings > 0
-    ? `<span class="badge badge-amber">${mailings} mailing${mailings > 1 ? "s" : ""} sent</span>`
+    : contacted ? `<span class="badge badge-blue">Contacted</span>`
+    : mailings > 0 ? `<span class="badge badge-amber">${mailings} mailing${mailings > 1 ? "s" : ""} sent</span>`
     : `<span class="badge badge-gray">Not contacted</span>`;
   const sel = selectedMLS.has(p.mls) ? " selected" : "";
   const clickFn = exportMode ? `toggleSelectProspect('${p.mls}')` : `openProspectModal('${p.id}')`;
@@ -169,10 +276,7 @@ function prospectCard(p) {
         <div class="card-mls">MLS #${p.mls} · Expires ${p.expiry || "—"}</div>
       </div>
     </div>
-    <div class="card-meta">
-      ${statusBadge}
-      <span class="badge badge-red">${p.status || "Expiré"}</span>
-    </div>
+    <div class="card-meta">${statusBadge}<span class="badge badge-red">${p.status || "Expiré"}</span></div>
     <div class="card-tracking">
       <div class="track-item"><div class="track-label">Last price</div><div class="track-value">${lastPrice} ${priceDrop}</div></div>
       <div class="track-item"><div class="track-label">Mailings</div><div class="track-value">${mailings}/4</div></div>
@@ -192,15 +296,11 @@ window.openProspectModal = async function (id) {
 function renderProspectModal(p) {
   const fmt = n => n ? "$" + Number(n).toLocaleString("fr-CA") : "—";
   const ownersHtml = (p.owners || []).map(o => `
-    <div class="owner-block">
-      <div class="on">${o.name}</div>
-      <div class="oa">${o.street}<br>${o.city} &nbsp;${o.postal}</div>
-    </div>`).join("");
+    <div class="owner-block"><div class="on">${o.name}</div>
+    <div class="oa">${o.street}<br>${o.city} &nbsp;${o.postal}</div></div>`).join("");
   const mailHtml = [0,1,2,3].map(i => `
-    <div class="mail-slot">
-      <label>Mailing ${i+1}</label>
-      <input type="date" value="${(p.mail || [])[i] || ""}" onchange="updateMailDate('${p.id}',${i},this.value)" />
-    </div>`).join("");
+    <div class="mail-slot"><label>Mailing ${i+1}</label>
+    <input type="date" value="${(p.mail || [])[i] || ""}" onchange="updateMailDate('${p.id}',${i},this.value)" /></div>`).join("");
   const visits = p.visits || [];
   const visitRows = visits.length === 0
     ? `<p style="font-size:13px;color:var(--text-3);padding:8px 0;">No visits logged yet.</p>`
@@ -208,27 +308,21 @@ function renderProspectModal(p) {
       visits.map((v, i) => `
         <div class="visit-entry">
           <input type="date" value="${v.date || ""}" onchange="updateVisitField('${p.id}',${i},'date',this.value)" />
-          <button class="yn-btn ${v.contact === 'yes' ? 'yes' : v.contact === 'no' ? 'no' : ''}" onclick="cycleVisitField('${p.id}',${i},'contact')" title="Contact made?">
-            ${v.contact === 'yes' ? '✓' : v.contact === 'no' ? '✕' : '—'}
-            <span class="yn-label">Contact</span>
+          <button class="yn-btn ${v.contact === 'yes' ? 'yes' : v.contact === 'no' ? 'no' : ''}" onclick="cycleVisitField('${p.id}',${i},'contact')">
+            ${v.contact === 'yes' ? '✓' : v.contact === 'no' ? '✕' : '—'}<span class="yn-label">Contact</span>
           </button>
-          <button class="yn-btn ${v.evalBooked === 'yes' ? 'yes' : v.evalBooked === 'no' ? 'no' : ''}" onclick="cycleVisitField('${p.id}',${i},'evalBooked')" title="Eval booked?">
-            ${v.evalBooked === 'yes' ? '✓' : v.evalBooked === 'no' ? '✕' : '—'}
-            <span class="yn-label">Eval</span>
+          <button class="yn-btn ${v.evalBooked === 'yes' ? 'yes' : v.evalBooked === 'no' ? 'no' : ''}" onclick="cycleVisitField('${p.id}',${i},'evalBooked')">
+            ${v.evalBooked === 'yes' ? '✓' : v.evalBooked === 'no' ? '✕' : '—'}<span class="yn-label">Eval</span>
           </button>
           <button class="icon-btn red" onclick="removeVisit('${p.id}',${i})">✕</button>
         </div>`).join("");
   const adminActions = isAdmin ? `
-    <div class="modal-section">
-      <div class="modal-section-title">Admin</div>
-      <button class="btn-danger" onclick="deleteProspect('${p.id}')">Delete prospect</button>
-    </div>` : "";
+    <div class="modal-section"><div class="modal-section-title">Admin</div>
+    <button class="btn-danger" onclick="deleteProspect('${p.id}')">Delete prospect</button></div>` : "";
   document.getElementById("prospectModalContent").innerHTML = `
     <div class="modal-header">
-      <div>
-        <div class="modal-title">${(p.owners || []).map(o => o.name).join(", ")}</div>
-        <div class="modal-sub">MLS #${p.mls} · ${p.listingAddress || ""}</div>
-      </div>
+      <div><div class="modal-title">${(p.owners || []).map(o => o.name).join(", ")}</div>
+      <div class="modal-sub">MLS #${p.mls} · ${p.listingAddress || ""}</div></div>
       <button class="close-x" onclick="closeAllModals()">×</button>
     </div>
     <div class="detail-grid">
@@ -237,17 +331,12 @@ function renderProspectModal(p) {
       <div class="detail-field"><div class="lbl">Contract start</div><div class="val">${p.contractStart || "—"}</div></div>
       <div class="detail-field"><div class="lbl">Expiry</div><div class="val">${p.expiry || "—"}</div></div>
     </div>
-    <div class="modal-section">
-      <div class="modal-section-title">Agency &amp; Broker</div>
+    <div class="modal-section"><div class="modal-section-title">Agency &amp; Broker</div>
       <div style="font-size:14px;font-weight:500;">${p.broker || "—"}</div>
       <div style="font-size:13px;color:var(--text-2);">${p.agency || ""} · ${p.brokerPhone || ""}</div>
     </div>
-    <div class="modal-section">
-      <div class="modal-section-title">Owner(s) — Mailing Address</div>
-      ${ownersHtml}
-    </div>
-    <div class="modal-section">
-      <div class="modal-section-title">Mailing Attempts</div>
+    <div class="modal-section"><div class="modal-section-title">Owner(s) — Mailing Address</div>${ownersHtml}</div>
+    <div class="modal-section"><div class="modal-section-title">Mailing Attempts</div>
       <div class="mail-grid">${mailHtml}</div>
     </div>
     <div class="modal-section">
@@ -257,8 +346,7 @@ function renderProspectModal(p) {
       </div>
       ${visitRows}
     </div>
-    ${adminActions}
-  `;
+    ${adminActions}`;
 }
 
 window.updateMailDate = async function (id, idx, val) {
@@ -311,8 +399,7 @@ window.removeVisit = async function (id, idx) {
 
 async function logActivity(prospectId, action) {
   await addDoc(collection(db, "activity"), {
-    prospectId, action,
-    agentId: currentUser.uid,
+    prospectId, action, agentId: currentUser.uid,
     agentName: currentUserProfile?.name || currentUser.email,
     timestamp: serverTimestamp()
   });
@@ -321,16 +408,13 @@ async function logActivity(prospectId, action) {
 window.openAddProspect = function (tab) {
   tab = tab || "single";
   document.getElementById("addProspectContent").innerHTML = `
-    <div class="modal-header">
-      <div class="modal-title">Add Prospects</div>
-      <button class="close-x" onclick="closeAllModals()">×</button>
-    </div>
+    <div class="modal-header"><div class="modal-title">Add Prospects</div>
+      <button class="close-x" onclick="closeAllModals()">×</button></div>
     <div style="display:flex;gap:0;margin-bottom:20px;border:1px solid var(--border-med);border-radius:var(--radius);overflow:hidden;">
       <button onclick="openAddProspect('single')" style="flex:1;padding:9px;font-size:13px;font-family:var(--font);border:none;cursor:pointer;background:${tab==='single'?'var(--accent)':'var(--surface)'};color:${tab==='single'?'#fff':'var(--text-2)'};">Single Entry</button>
       <button onclick="openAddProspect('bulk')" style="flex:1;padding:9px;font-size:13px;font-family:var(--font);border:none;border-left:1px solid var(--border-med);cursor:pointer;background:${tab==='bulk'?'var(--accent)':'var(--surface)'};color:${tab==='bulk'?'#fff':'var(--text-2)'};">Bulk CSV Import</button>
     </div>
-    ${tab === 'single' ? singleEntryForm() : bulkImportForm()}
-  `;
+    ${tab === 'single' ? singleEntryForm() : bulkImportForm()}`;
   openModal("addProspectModal");
 };
 
@@ -338,13 +422,12 @@ function singleEntryForm() {
   return `
     <div class="form-group"><label>MLS #</label><input type="text" id="ap_mls" placeholder="e.g. 9183921" /></div>
     <div class="form-group"><label>Status</label>
-      <select id="ap_status"><option value="Expiré">Expiré</option><option value="Annulé">Annulé</option></select>
-    </div>
-    <div class="form-group"><label>Listing Address</label><input type="text" id="ap_listingAddr" placeholder="Street, app., City" /></div>
+      <select id="ap_status"><option value="Expiré">Expiré</option><option value="Annulé">Annulé</option></select></div>
+    <div class="form-group"><label>Listing Address</label><input type="text" id="ap_listingAddr" /></div>
     <div class="form-group"><label>Contract Start</label><input type="date" id="ap_start" /></div>
     <div class="form-group"><label>Expiry Date</label><input type="date" id="ap_expiry" /></div>
-    <div class="form-group"><label>Last Price ($)</label><input type="number" id="ap_price" placeholder="540000" /></div>
-    <div class="form-group"><label>Original Price ($)</label><input type="number" id="ap_origPrice" placeholder="540000" /></div>
+    <div class="form-group"><label>Last Price ($)</label><input type="number" id="ap_price" /></div>
+    <div class="form-group"><label>Original Price ($)</label><input type="number" id="ap_origPrice" /></div>
     <div class="form-group"><label>Previous Price ($)</label><input type="number" id="ap_prevPrice" /></div>
     <div class="form-group"><label>Agency</label><input type="text" id="ap_agency" /></div>
     <div class="form-group"><label>Broker Name</label><input type="text" id="ap_broker" /></div>
@@ -372,20 +455,13 @@ function bulkImportForm() {
   return `
     <div style="background:var(--accent-light);border-radius:var(--radius);padding:14px;margin-bottom:16px;">
       <p style="font-size:13px;font-weight:500;color:var(--accent);margin-bottom:6px;">How it works</p>
-      <p style="font-size:12px;color:var(--accent);line-height:1.6;">
-        1. Download the CSV template below<br>
-        2. Open in Excel or Google Sheets<br>
-        3. Fill in your prospects (one per row)<br>
-        4. Save as CSV and upload here
-      </p>
+      <p style="font-size:12px;color:var(--accent);line-height:1.6;">1. Download the CSV template below<br>2. Open in Excel or Google Sheets<br>3. Fill in your prospects (one per row)<br>4. Save as CSV and upload here</p>
     </div>
     <div style="margin-bottom:16px;">
       <button class="btn-secondary" style="width:100%;" onclick="downloadTemplate()">↓ Download CSV Template</button>
     </div>
-    <div class="form-group">
-      <label>Upload your filled CSV</label>
-      <input type="file" id="csvFileInput" accept=".csv" onchange="previewCSV(this)" style="padding:8px;background:var(--bg);" />
-    </div>
+    <div class="form-group"><label>Upload your filled CSV</label>
+      <input type="file" id="csvFileInput" accept=".csv" onchange="previewCSV(this)" style="padding:8px;background:var(--bg);" /></div>
     <div id="csvPreview" style="display:none;margin-bottom:16px;">
       <div style="font-size:12px;font-weight:500;color:var(--text-2);margin-bottom:8px;" id="csvPreviewLabel"></div>
       <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);" id="csvPreviewList"></div>
@@ -402,15 +478,13 @@ window.downloadTemplate = function() {
   const example = '9183921,Expiré,"10200 Boul. de Acadie app. 814 Montreal",2025-09-17,2026-03-31,540000,540000,,LES IMMEUBLES HOME-PRO,Amir Keryakes,514-943-2647,Medhat Azer,10200 Acadie app. 814,Montreal,H4N 3L3,,,,';
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([headers + "\n" + example], {type:"text/csv"}));
-  a.download = "prospects-template.csv";
-  a.click();
+  a.download = "prospects-template.csv"; a.click();
 };
 
 let parsedCSVRows = [];
 
 window.previewCSV = function(input) {
-  const file = input.files[0];
-  if (!file) return;
+  const file = input.files[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = function(e) {
     const rows = parseCSV(e.target.result);
@@ -423,8 +497,7 @@ window.previewCSV = function(input) {
       return `<div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:10px;align-items:center;">
         <span style="background:var(--accent-light);color:var(--accent);padding:2px 6px;border-radius:4px;font-weight:500;white-space:nowrap;">MLS ${mls}</span>
         <span style="flex:1;">${owner}</span>
-        <span style="color:var(--text-3);">$${Number(price).toLocaleString("fr-CA")}</span>
-      </div>`;
+        <span style="color:var(--text-3);">$${Number(price).toLocaleString("fr-CA")}</span></div>`;
     }).join("");
     document.getElementById("csvPreviewLabel").textContent = parsedCSVRows.length + " prospect(s) ready to import";
     document.getElementById("csvPreviewList").innerHTML = preview;
@@ -508,16 +581,14 @@ window.deleteProspect = async function (id) {
 };
 
 window.startExportMode = function () {
-  exportMode = true;
-  selectedMLS.clear();
+  exportMode = true; selectedMLS.clear();
   document.getElementById("selBanner").classList.add("active");
   document.getElementById("exportModeBtn").style.display = "none";
   renderProspects();
 };
 
 window.cancelExportMode = function () {
-  exportMode = false;
-  selectedMLS.clear();
+  exportMode = false; selectedMLS.clear();
   document.getElementById("selBanner").classList.remove("active");
   document.getElementById("exportModeBtn").style.display = "";
   renderProspects();
@@ -526,8 +597,7 @@ window.cancelExportMode = function () {
 window.toggleSelectProspect = function (mls) {
   if (selectedMLS.has(mls)) selectedMLS.delete(mls);
   else selectedMLS.add(mls);
-  updateSelBanner();
-  renderProspects();
+  updateSelBanner(); renderProspects();
 };
 
 window.selectAllProspects = function () {
@@ -548,29 +618,22 @@ function updateSelBanner() {
 window.showExportConfirm = function () {
   const sel = allProspects.filter(p => selectedMLS.has(p.mls));
   let num = 0;
-  const items = sel.map(p =>
-    (p.owners || []).map(o => {
-      num++;
-      return `<div class="export-item">
-        <div class="export-num">${num}</div>
-        <div><div class="export-item-name">${o.name}</div>
-        <div class="export-item-addr">${o.street}, ${o.city} ${o.postal}</div></div>
-      </div>`;
-    }).join("")
-  ).join("");
+  const items = sel.map(p => (p.owners || []).map(o => {
+    num++;
+    return `<div class="export-item"><div class="export-num">${num}</div>
+      <div><div class="export-item-name">${o.name}</div>
+      <div class="export-item-addr">${o.street}, ${o.city} ${o.postal}</div></div></div>`;
+  }).join("")).join("");
   const totalLabels = sel.reduce((s, p) => s + (p.owners || []).length, 0);
   document.getElementById("exportModalContent").innerHTML = `
-    <div class="modal-header">
-      <div class="modal-title">Confirm export</div>
-      <button class="close-x" onclick="closeAllModals()">×</button>
-    </div>
+    <div class="modal-header"><div class="modal-title">Confirm export</div>
+      <button class="close-x" onclick="closeAllModals()">×</button></div>
     <p style="font-size:13px;color:var(--text-2);">${sel.length} prospect${sel.length !== 1 ? "s" : ""} · ${totalLabels} mailing label${totalLabels !== 1 ? "s" : ""}</p>
     <div class="export-list">${items}</div>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="closeAllModals()">Back</button>
       <button class="btn-confirm" onclick="doExport()">Download CSV ↓</button>
-    </div>
-  `;
+    </div>`;
   openModal("exportModal");
 };
 
@@ -586,10 +649,8 @@ window.doExport = function () {
   const csv = rows.map(r => r.map(v => `"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["\uFEFF"+csv], {type:"text/csv;charset=utf-8;"}));
-  a.download = "mailing_labels.csv";
-  a.click();
-  closeAllModals();
-  cancelExportMode();
+  a.download = "mailing_labels.csv"; a.click();
+  closeAllModals(); cancelExportMode();
   showToast("Export downloaded");
 };
 
@@ -610,19 +671,16 @@ async function renderDashboard() {
         const prospect = allProspects.find(p => p.id === a.prospectId);
         const pName = prospect ? (prospect.owners?.[0]?.name || "MLS #" + prospect.mls) : "Unknown";
         const ts = a.timestamp?.toDate ? a.timestamp.toDate().toLocaleDateString("en-CA") : "";
-        return `<div class="activity-item">
-          <div class="activity-dot"></div>
+        return `<div class="activity-item"><div class="activity-dot"></div>
           <div><div class="activity-text"><strong>${a.agentName || "Agent"}</strong> — ${a.action} on <em>${pName}</em></div>
-          <div class="activity-time">${ts}</div></div>
-        </div>`;
+          <div class="activity-time">${ts}</div></div></div>`;
       }).join("");
     }
   } catch(e) {}
   const agentStats = {};
   allProspects.forEach(p => {
     (p.visits || []).forEach(v => {
-      const aid = v.agentId || "unknown";
-      const aname = v.agentName || "Unknown";
+      const aid = v.agentId || "unknown"; const aname = v.agentName || "Unknown";
       if (!agentStats[aid]) agentStats[aid] = { name: aname, visits: 0, contacts: 0, evals: 0 };
       agentStats[aid].visits++;
       if (v.contact === "yes") agentStats[aid].contacts++;
@@ -633,16 +691,13 @@ async function renderDashboard() {
     ? '<p style="font-size:13px;color:var(--text-3);">No visit activity logged yet.</p>'
     : Object.values(agentStats).map(a => `
       <div class="agent-card">
-        <div class="agent-header">
-          <div class="agent-avatar">${a.name.slice(0,2).toUpperCase()}</div>
-          <div><div class="agent-name">${a.name}</div></div>
-        </div>
+        <div class="agent-header"><div class="agent-avatar">${a.name.slice(0,2).toUpperCase()}</div>
+        <div><div class="agent-name">${a.name}</div></div></div>
         <div class="agent-stats">
           <div class="agent-stat"><div class="agent-stat-num">${a.visits}</div><div class="agent-stat-lbl">Visits</div></div>
           <div class="agent-stat"><div class="agent-stat-num">${a.contacts}</div><div class="agent-stat-lbl">Contacts</div></div>
           <div class="agent-stat"><div class="agent-stat-num">${a.evals}</div><div class="agent-stat-lbl">Evals</div></div>
-        </div>
-      </div>`).join("");
+        </div></div>`).join("");
   el.innerHTML = `
     <div class="stats-grid">
       <div class="stat-card"><div class="stat-label">Prospects</div><div class="stat-value">${totalProspects}</div></div>
@@ -654,8 +709,7 @@ async function renderDashboard() {
     <div class="section-title" style="margin-bottom:12px;">Agent activity</div>
     ${agentCardsHtml}
     <div class="section-title" style="margin:20px 0 12px;">Recent activity log</div>
-    <div class="activity-list">${activityHtml}</div>
-  `;
+    <div class="activity-list">${activityHtml}</div>`;
 }
 
 async function loadAllUsers() {
@@ -671,10 +725,8 @@ async function renderAdmin() {
     : allUsers.map(u => `
       <div class="admin-card">
         <div class="agent-avatar">${(u.name || u.email || "?").slice(0,2).toUpperCase()}</div>
-        <div class="admin-card-info">
-          <div class="admin-card-name">${u.name || "—"}</div>
-          <div class="admin-card-email">${u.email || ""}</div>
-        </div>
+        <div class="admin-card-info"><div class="admin-card-name">${u.name || "—"}</div>
+        <div class="admin-card-email">${u.email || ""}</div></div>
         <span class="badge ${u.role === 'admin' ? 'badge-blue' : 'badge-gray'} admin-card-role">${u.role || "agent"}</span>
       </div>`).join("");
   el.innerHTML = `
@@ -683,33 +735,26 @@ async function renderAdmin() {
     <div style="margin-top:24px;padding:16px;background:var(--surface);border-radius:var(--radius-lg);border:1px solid var(--border);">
       <div class="section-title" style="margin-bottom:8px;">How to add agents</div>
       <p style="font-size:13px;color:var(--text-2);line-height:1.6;">
-        1. Go to your <strong>Firebase Console → Authentication → Users</strong><br>
-        2. Click <strong>Add user</strong>, enter their email + password<br>
-        3. Copy the generated UID, then go to <strong>Firestore → users collection</strong><br>
-        4. Create a document with that UID as the ID, with fields: <code>name</code>, <code>email</code>, <code>role: "agent"</code>
+        1. Firebase → Authentication → Users → Add user<br>
+        2. Copy UID → Firestore → users collection → Add document<br>
+        3. Document ID = UID, fields: <code>name</code>, <code>email</code>, <code>role: "agent"</code>
       </p>
-    </div>
-  `;
+    </div>`;
 }
 
 window.openInviteAgent = function () {
   document.getElementById("inviteModalContent").innerHTML = `
-    <div class="modal-header">
-      <div class="modal-title">Add Agent</div>
-      <button class="close-x" onclick="closeAllModals()">×</button>
-    </div>
+    <div class="modal-header"><div class="modal-title">Add Agent</div>
+      <button class="close-x" onclick="closeAllModals()">×</button></div>
     <ol style="font-size:13px;color:var(--text-2);line-height:2;padding-left:18px;">
       <li>Go to <strong>Authentication → Users → Add user</strong></li>
       <li>Enter the agent's email and a temporary password</li>
-      <li>Copy the UID that gets generated</li>
-      <li>Go to <strong>Firestore → users collection</strong></li>
-      <li>Create a new document with the UID as the document ID</li>
-      <li>Add fields: <code>name</code>, <code>email</code>, <code>role: "agent"</code></li>
+      <li>Copy the UID → Firestore → users collection</li>
+      <li>New document: UID as ID, fields: <code>name</code>, <code>email</code>, <code>role: "agent"</code></li>
     </ol>
     <div class="modal-actions">
       <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="closeAllModals()">Got it</button>
-    </div>
-  `;
+    </div>`;
   openModal("inviteModal");
 };
 
@@ -728,8 +773,7 @@ window.closeAllModals = function (e) {
 function showToast(msg) {
   let t = document.querySelector(".toast");
   if (!t) { t = document.createElement("div"); t.className = "toast"; document.body.appendChild(t); }
-  t.textContent = msg;
-  t.classList.add("show");
+  t.textContent = msg; t.classList.add("show");
   setTimeout(() => t.classList.remove("show"), 2500);
 }
 
