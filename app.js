@@ -339,11 +339,23 @@ async function logActivity(prospectId, action) {
 
 // ── Add Prospect (admin) ───────────────────────────────────
 window.openAddProspect = function (tab) {
+  tab = tab || "single";
   document.getElementById("addProspectContent").innerHTML = `
     <div class="modal-header">
-      <div class="modal-title">Add Prospect</div>
+      <div class="modal-title">Add Prospects</div>
       <button class="close-x" onclick="closeAllModals()">×</button>
     </div>
+    <div style="display:flex;gap:0;margin-bottom:20px;border:1px solid var(--border-med);border-radius:var(--radius);overflow:hidden;">
+      <button onclick="openAddProspect('single')" style="flex:1;padding:9px;font-size:13px;font-family:var(--font);border:none;cursor:pointer;background:${tab==='single'?'var(--accent)':'var(--surface)'};color:${tab==='single'?'#fff':'var(--text-2)'};">Single Entry</button>
+      <button onclick="openAddProspect('bulk')" style="flex:1;padding:9px;font-size:13px;font-family:var(--font);border:none;border-left:1px solid var(--border-med);cursor:pointer;background:${tab==='bulk'?'var(--accent)':'var(--surface)'};color:${tab==='bulk'?'#fff':'var(--text-2)'};">Bulk CSV Import</button>
+    </div>
+    ${tab === 'single' ? singleEntryForm() : bulkImportForm()}
+  `;
+  openModal("addProspectModal");
+};
+
+function singleEntryForm() {
+  return `
     <div class="form-group"><label>MLS #</label><input type="text" id="ap_mls" placeholder="e.g. 9183921" /></div>
     <div class="form-group"><label>Status</label>
       <select id="ap_status"><option value="Expiré">Expiré</option><option value="Annulé">Annulé</option></select>
@@ -353,7 +365,7 @@ window.openAddProspect = function (tab) {
     <div class="form-group"><label>Expiry Date</label><input type="date" id="ap_expiry" /></div>
     <div class="form-group"><label>Last Price ($)</label><input type="number" id="ap_price" placeholder="540000" /></div>
     <div class="form-group"><label>Original Price ($)</label><input type="number" id="ap_origPrice" placeholder="540000" /></div>
-    <div class="form-group"><label>Previous Price ($) <span style="font-weight:300;opacity:0.6;">(if reduced)</span></label><input type="number" id="ap_prevPrice" placeholder="" /></div>
+    <div class="form-group"><label>Previous Price ($)</label><input type="number" id="ap_prevPrice" placeholder="" /></div>
     <div class="form-group"><label>Agency</label><input type="text" id="ap_agency" /></div>
     <div class="form-group"><label>Broker Name</label><input type="text" id="ap_broker" /></div>
     <div class="form-group"><label>Broker Phone</label><input type="text" id="ap_phone" /></div>
@@ -364,7 +376,7 @@ window.openAddProspect = function (tab) {
     <div class="form-group"><label>City</label><input type="text" id="ap_o1city" /></div>
     <div class="form-group"><label>Postal Code</label><input type="text" id="ap_o1postal" /></div>
     <hr class="divider" />
-    <p style="font-size:13px;font-weight:500;margin-bottom:12px;">Owner 2 <span style="font-weight:300;opacity:0.6;">(optional)</span></p>
+    <p style="font-size:13px;font-weight:500;margin-bottom:12px;">Owner 2 (optional)</p>
     <div class="form-group"><label>Owner Name</label><input type="text" id="ap_o2name" /></div>
     <div class="form-group"><label>Street</label><input type="text" id="ap_o2street" /></div>
     <div class="form-group"><label>City</label><input type="text" id="ap_o2city" /></div>
@@ -373,9 +385,116 @@ window.openAddProspect = function (tab) {
     <div class="modal-actions">
       <button class="btn-secondary" onclick="closeAllModals()">Cancel</button>
       <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="saveNewProspect()">Save Prospect</button>
+    </div>`;
+}
+
+function bulkImportForm() {
+  return `
+    <div style="background:var(--accent-light);border-radius:var(--radius);padding:14px;margin-bottom:16px;">
+      <p style="font-size:13px;font-weight:500;color:var(--accent);margin-bottom:6px;">How it works</p>
+      <p style="font-size:12px;color:var(--accent);line-height:1.6;">
+        1. Download the CSV template below<br>
+        2. Open in Excel or Google Sheets<br>
+        3. Fill in your prospects (one per row)<br>
+        4. Save as CSV and upload here
+      </p>
     </div>
-  `;
-  openModal("addProspectModal");
+    <div style="margin-bottom:16px;">
+      <button class="btn-secondary" style="width:100%;" onclick="downloadTemplate()">↓ Download CSV Template</button>
+    </div>
+    <div class="form-group">
+      <label>Upload your filled CSV</label>
+      <input type="file" id="csvFileInput" accept=".csv" onchange="previewCSV(this)" style="padding:8px;background:var(--bg);" />
+    </div>
+    <div id="csvPreview" style="display:none;margin-bottom:16px;">
+      <div style="font-size:12px;font-weight:500;color:var(--text-2);margin-bottom:8px;" id="csvPreviewLabel"></div>
+      <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);" id="csvPreviewList"></div>
+    </div>
+    <div id="ap_error" class="error-msg" style="display:none;margin-top:8px;"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeAllModals()">Cancel</button>
+      <button class="btn-primary" id="importBtn" style="width:auto;padding:9px 20px;display:none;" onclick="importCSV()">Import All</button>
+    </div>`;
+}
+
+window.downloadTemplate = function() {
+  const headers = "mls,status,listingAddress,contractStart,expiry,lastPrice,origPrice,prevPrice,agency,broker,brokerPhone,owner1Name,owner1Street,owner1City,owner1Postal,owner2Name,owner2Street,owner2City,owner2Postal";
+  const example = '9183921,Expiré,"10200 Boul. de Acadie app. 814 Montreal",2025-09-17,2026-03-31,540000,540000,,LES IMMEUBLES HOME-PRO,Amir Keryakes,514-943-2647,Medhat Azer,10200 Acadie app. 814,Montreal,H4N 3L3,,,,';
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([headers + "\n" + example], {type:"text/csv"}));
+  a.download = "prospects-template.csv";
+  a.click();
+};
+
+let parsedCSVRows = [];
+
+window.previewCSV = function(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const rows = parseCSV(e.target.result);
+    if (rows.length < 2) return;
+    const headers = rows[0].map(h => h.trim().toLowerCase());
+    parsedCSVRows = rows.slice(1).filter(r => r.some(c => c.trim()));
+    const get = (row, col) => { const idx = headers.indexOf(col); return idx >= 0 ? (row[idx] || "").trim() : ""; };
+    const preview = parsedCSVRows.map(row => {
+      const mls = get(row,"mls"); const owner = get(row,"owner1name"); const price = get(row,"lastprice");
+      return `<div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:10px;align-items:center;">
+        <span style="background:var(--accent-light);color:var(--accent);padding:2px 6px;border-radius:4px;font-weight:500;white-space:nowrap;">MLS ${mls}</span>
+        <span style="flex:1;">${owner}</span>
+        <span style="color:var(--text-3);">$${Number(price).toLocaleString("fr-CA")}</span>
+      </div>`;
+    }).join("");
+    document.getElementById("csvPreviewLabel").textContent = parsedCSVRows.length + " prospect(s) ready to import";
+    document.getElementById("csvPreviewList").innerHTML = preview;
+    document.getElementById("csvPreview").style.display = "block";
+    document.getElementById("importBtn").style.display = "block";
+  };
+  reader.readAsText(file);
+};
+
+function parseCSV(text) {
+  const rows = []; let row = []; let cell = ""; let inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"' && inQ && text[i+1] === '"') { cell += '"'; i++; }
+    else if (ch === '"') { inQ = !inQ; }
+    else if (ch === ',' && !inQ) { row.push(cell); cell = ""; }
+    else if ((ch === '\n' || ch === '\r') && !inQ) {
+      if (ch === '\r' && text[i+1] === '\n') i++;
+      row.push(cell); rows.push(row); row = []; cell = "";
+    } else { cell += ch; }
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+
+window.importCSV = async function() {
+  const btn = document.getElementById("importBtn");
+  btn.textContent = "Importing..."; btn.disabled = true;
+  const hdrs = ["mls","status","listingaddress","contractstart","expiry","lastprice","origprice","prevprice","agency","broker","brokerphone","owner1name","owner1street","owner1city","owner1postal","owner2name","owner2street","owner2city","owner2postal"];
+  let imported = 0; let failed = 0;
+  for (const row of parsedCSVRows) {
+    try {
+      const get = col => { const i = hdrs.indexOf(col); return i >= 0 ? (row[i]||"").trim() : ""; };
+      if (!get("mls") || !get("owner1name")) { failed++; continue; }
+      const owners = [{name:get("owner1name"),street:get("owner1street"),city:get("owner1city"),postal:get("owner1postal")}];
+      if (get("owner2name")) owners.push({name:get("owner2name"),street:get("owner2street"),city:get("owner2city"),postal:get("owner2postal")});
+      await addDoc(collection(db,"prospects"), {
+        mls:get("mls"), status:get("status")||"Expiré", listingAddress:get("listingaddress"),
+        contractStart:get("contractstart"), expiry:get("expiry"),
+        lastPrice:Number(get("lastprice"))||0, origPrice:Number(get("origprice"))||0,
+        prevPrice:get("prevprice")?Number(get("prevprice")):null,
+        agency:get("agency"), broker:get("broker"), brokerPhone:get("brokerphone"),
+        owners, mail:["","","",""], visits:[],
+        createdAt:serverTimestamp(), createdBy:currentUser.uid
+      });
+      imported++;
+    } catch(e) { failed++; }
+  }
+  closeAllModals();
+  showToast("Imported " + imported + " prospect(s)" + (failed ? " · " + failed + " skipped" : ""));
 };
 
 window.saveNewProspect = async function () {
