@@ -15,9 +15,9 @@ let allUsers = [];
 let exportMode = false;
 let selectedMLS = new Set();
 let unsubscribeProspects = null;
-let activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all", type: "all", municipality: "all" };
+let activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all", type: "all" };
+let selectedMunicipalities = new Set();
 
-// ── Property type detection ────────────────────────────────
 function detectPropertyType(address) {
   if (!address) return "house";
   const a = address.toLowerCase();
@@ -27,19 +27,14 @@ function detectPropertyType(address) {
 
 function extractMunicipality(address) {
   if (!address) return "Unknown";
-  const match = address.match(/,\s*([^,(]+?)(?:\s*\(([^)]+)\))?\s*(?:H\w\d|\d[A-Z]\d|$)/i);
-  if (match) {
-    const inner = match[2] || match[1];
-    return inner.trim().replace(/\s+/g, " ");
-  }
-  const parts = address.split(",");
-  if (parts.length >= 2) return parts[parts.length - 1].trim().split(" ").slice(0,2).join(" ");
+  const match = address.match(/\(([^)]+)\)/);
+  if (match) return match[1].trim();
   return "Unknown";
 }
 
 function getMunicipalities() {
   const set = new Set(allProspects.map(p => extractMunicipality(p.listingAddress)));
-  return [...set].filter(Boolean).sort();
+  return [...set].filter(m => m && m !== "Unknown").sort();
 }
 
 onAuthStateChanged(auth, async (user) => {
@@ -143,12 +138,14 @@ function updateProspectCount() {
     `${allProspects.length} expired listing${allProspects.length !== 1 ? "s" : ""}`;
 }
 
-// ── Filters ────────────────────────────────────────────────
+// ── Filter Bar ─────────────────────────────────────────────
 function renderFilterBar() {
   const bar = document.getElementById("filterBar");
   if (!bar) return;
-  const hasActive = activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all" || activeFilters.type !== "all" || activeFilters.municipality !== "all";
-  const isOpen = bar.dataset.open === "true";
+  const hasFilters = activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all" || activeFilters.type !== "all";
+  const hasMuni = selectedMunicipalities.size > 0;
+  const isFilterOpen = bar.dataset.filterOpen === "true";
+  const isMuniOpen = bar.dataset.muniOpen === "true";
 
   const btn = (label, key, val, icon) => {
     const active = activeFilters[key] === val;
@@ -156,64 +153,102 @@ function renderFilterBar() {
   };
 
   const municipalities = getMunicipalities();
-  const municipalityBtns = municipalities.map(m => btn(m, "municipality", m, "")).join("");
+  const muniButtons = municipalities.map(m => {
+    const active = selectedMunicipalities.has(m);
+    return `<button onclick="toggleMunicipality('${m}')" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;white-space:nowrap;border:1px solid ${active ? 'var(--accent)' : 'var(--border-med)'};background:${active ? 'var(--accent)' : 'var(--surface)'};color:${active ? '#fff' : 'var(--text-2)'};font-weight:${active ? '500' : '400'};transition:all 0.15s;">
+      ${active ? '✓ ' : ''}${m}
+    </button>`;
+  }).join("");
 
   bar.innerHTML = `
-    <div style="margin-bottom:${isOpen ? '0' : '16px'};">
-      <button onclick="toggleFilterBar()" style="display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:99px;font-size:13px;font-family:var(--font);cursor:pointer;border:1px solid ${hasActive ? 'var(--accent)' : 'var(--border-med)'};background:${hasActive ? 'var(--accent-light)' : 'var(--surface)'};color:${hasActive ? 'var(--accent)' : 'var(--text-2)'};font-weight:${hasActive ? '500' : '400'};">
-        <span>⚙ Filters${hasActive ? ' (active)' : ''}</span>
-        <span style="font-size:10px;">${isOpen ? '▲' : '▼'}</span>
-      </button>
-    </div>
-    ${isOpen ? `
-    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:16px;background:var(--surface);">
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:${isFilterOpen || isMuniOpen ? '0' : '16px'};">
 
+      <button onclick="toggleFilterPanel()" style="display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:99px;font-size:13px;font-family:var(--font);cursor:pointer;border:1px solid ${hasFilters ? 'var(--accent)' : 'var(--border-med)'};background:${hasFilters ? 'var(--accent-light)' : 'var(--surface)'};color:${hasFilters ? 'var(--accent)' : 'var(--text-2)'};font-weight:${hasFilters ? '500' : '400'};">
+        <span>⚙ Filters${hasFilters ? ' (active)' : ''}</span>
+        <span style="font-size:10px;">${isFilterOpen ? '▲' : '▼'}</span>
+      </button>
+
+      <button onclick="toggleMuniPanel()" style="display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:99px;font-size:13px;font-family:var(--font);cursor:pointer;border:1px solid ${hasMuni ? 'var(--accent)' : 'var(--border-med)'};background:${hasMuni ? 'var(--accent-light)' : 'var(--surface)'};color:${hasMuni ? 'var(--accent)' : 'var(--text-2)'};font-weight:${hasMuni ? '500' : '400'};">
+        <span>📍 Municipality${hasMuni ? ` (${selectedMunicipalities.size})` : ''}</span>
+        <span style="font-size:10px;">${isMuniOpen ? '▲' : '▼'}</span>
+      </button>
+
+      ${hasFilters || hasMuni ? `<button onclick="resetAll()" style="padding:7px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;border:1px solid var(--red-bg);background:var(--red-bg);color:var(--red);font-weight:500;">✕ Reset all</button>` : ""}
+    </div>
+
+    ${isFilterOpen ? `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:10px;background:var(--surface);">
       <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Type</span>
       ${btn("All", "type", "all", "")}
       ${btn("Condo", "type", "condo", "🏢")}
       ${btn("House", "type", "house", "🏠")}
-      <span style="width:1px;height:20px;background:var(--border);margin:0 2px;"></span>
-
-      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Municipality</span>
-      ${btn("All", "municipality", "all", "")}
-      ${municipalityBtns}
-      <span style="width:1px;height:20px;background:var(--border);margin:0 2px;"></span>
-
+      <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
       <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Sort</span>
       ${btn("Newest", "sort", "newest", "↓")}
       ${btn("Oldest", "sort", "oldest", "↑")}
       ${btn("Price ↑", "sort", "price_asc", "")}
       ${btn("Price ↓", "sort", "price_desc", "")}
-      <span style="width:1px;height:20px;background:var(--border);margin:0 2px;"></span>
-
+      <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
       <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Mailers</span>
       ${btn("All", "mailing", "all", "")}
       ${btn("None sent", "mailing", "none", "✉️")}
       ${btn("1–3 sent", "mailing", "partial", "")}
       ${btn("All 4 sent", "mailing", "complete", "✅")}
-      <span style="width:1px;height:20px;background:var(--border);margin:0 2px;"></span>
-
+      <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
       <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Visits</span>
       ${btn("All", "visit", "all", "")}
       ${btn("Not visited", "visit", "none", "")}
       ${btn("Visited", "visit", "some", "🚪")}
-      <span style="width:1px;height:20px;background:var(--border);margin:0 2px;"></span>
-
+      <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
       <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Status</span>
       ${btn("All", "eval", "all", "")}
       ${btn("Eval booked", "eval", "booked", "📅")}
       ${btn("Contacted", "eval", "contacted", "☎️")}
       ${btn("No contact", "eval", "none", "")}
-
-      ${hasActive ? `<span style="width:1px;height:20px;background:var(--border);margin:0 2px;"></span><button onclick="resetFilters()" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;border:1px solid var(--red-bg);background:var(--red-bg);color:var(--red);font-weight:500;">✕ Reset all</button>` : ""}
     </div>` : ""}
+
+    ${isMuniOpen ? `
+    <div style="padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:10px;background:var(--surface);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);">Select municipalities</span>
+        ${selectedMunicipalities.size > 0 ? `<button onclick="clearMunicipalities()" style="font-size:11px;color:var(--red);background:none;border:none;cursor:pointer;">Clear all</button>` : ""}
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${municipalities.length === 0
+          ? '<span style="font-size:13px;color:var(--text-3);">No municipalities found — add prospects first.</span>'
+          : muniButtons}
+      </div>
+    </div>` : ""}
+
+    ${isFilterOpen || isMuniOpen ? '<div style="margin-bottom:16px;"></div>' : ""}
   `;
 }
 
-window.toggleFilterBar = function() {
+window.toggleFilterPanel = function() {
   const bar = document.getElementById("filterBar");
-  bar.dataset.open = bar.dataset.open === "true" ? "false" : "true";
+  bar.dataset.filterOpen = bar.dataset.filterOpen === "true" ? "false" : "true";
+  bar.dataset.muniOpen = "false";
   renderFilterBar();
+};
+
+window.toggleMuniPanel = function() {
+  const bar = document.getElementById("filterBar");
+  bar.dataset.muniOpen = bar.dataset.muniOpen === "true" ? "false" : "true";
+  bar.dataset.filterOpen = "false";
+  renderFilterBar();
+};
+
+window.toggleMunicipality = function(m) {
+  if (selectedMunicipalities.has(m)) selectedMunicipalities.delete(m);
+  else selectedMunicipalities.add(m);
+  renderFilterBar();
+  renderProspects();
+};
+
+window.clearMunicipalities = function() {
+  selectedMunicipalities.clear();
+  renderFilterBar();
+  renderProspects();
 };
 
 window.setFilter = function(key, val) {
@@ -222,16 +257,20 @@ window.setFilter = function(key, val) {
   renderProspects();
 };
 
-window.resetFilters = function() {
-  activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all", type: "all", municipality: "all" };
+window.resetAll = function() {
+  activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all", type: "all" };
+  selectedMunicipalities.clear();
+  const bar = document.getElementById("filterBar");
+  if (bar) { bar.dataset.filterOpen = "false"; bar.dataset.muniOpen = "false"; }
   renderFilterBar();
   renderProspects();
 };
 
+window.resetFilters = window.resetAll;
+
 function getFilteredAndSorted() {
   const q = document.getElementById("searchInput").value.toLowerCase();
   let list = [...allProspects];
-
   if (q) {
     list = list.filter(p => {
       const names = (p.owners || []).map(o => o.name).join(" ").toLowerCase();
@@ -241,8 +280,8 @@ function getFilteredAndSorted() {
   if (activeFilters.type !== "all") {
     list = list.filter(p => detectPropertyType(p.listingAddress) === activeFilters.type);
   }
-  if (activeFilters.municipality !== "all") {
-    list = list.filter(p => extractMunicipality(p.listingAddress) === activeFilters.municipality);
+  if (selectedMunicipalities.size > 0) {
+    list = list.filter(p => selectedMunicipalities.has(extractMunicipality(p.listingAddress)));
   }
   if (activeFilters.mailing !== "all") {
     list = list.filter(p => {
@@ -282,11 +321,11 @@ window.renderProspects = function () {
   renderFilterBar();
   const filtered = getFilteredAndSorted();
   const container = document.getElementById("prospectsContainer");
-  const hasActive = activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all" || activeFilters.type !== "all" || activeFilters.municipality !== "all";
+  const hasActive = activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all" || activeFilters.type !== "all" || selectedMunicipalities.size > 0;
   if (!filtered.length) {
     container.innerHTML = `<div class="empty-state"><div class="empty-icon">◎</div>
       <div class="empty-title">${hasActive ? "No prospects match these filters" : "No prospects found"}</div>
-      <div class="empty-sub">${hasActive ? '<button onclick="resetFilters()" style="margin-top:8px;padding:6px 14px;border-radius:99px;background:var(--accent);color:#fff;border:none;font-size:13px;cursor:pointer;">Reset filters</button>' : allProspects.length === 0 && isAdmin ? "Add your first prospect using the button above." : "Try a different search."}</div>
+      <div class="empty-sub">${hasActive ? '<button onclick="resetAll()" style="margin-top:8px;padding:6px 14px;border-radius:99px;background:var(--accent);color:#fff;border:none;font-size:13px;cursor:pointer;">Reset all filters</button>' : allProspects.length === 0 && isAdmin ? "Add your first prospect using the button above." : "Try a different search."}</div>
     </div>`;
     return;
   }
@@ -309,8 +348,8 @@ function prospectCard(p) {
     : mailings > 0 ? `<span class="badge badge-amber">${mailings} mailing${mailings > 1 ? "s" : ""} sent</span>`
     : `<span class="badge badge-gray">Not contacted</span>`;
   const typeBadge = propType === "condo"
-    ? `<span class="badge badge-blue" style="background:#EEEDFE;color:#3C3489;">🏢 Condo</span>`
-    : `<span class="badge badge-gray" style="background:#EAF3DE;color:#2D6A4F;">🏠 House</span>`;
+    ? `<span class="badge" style="background:#EEEDFE;color:#3C3489;">🏢 Condo</span>`
+    : `<span class="badge" style="background:#EAF3DE;color:#2D6A4F;">🏠 House</span>`;
   const sel = selectedMLS.has(p.mls) ? " selected" : "";
   const clickFn = exportMode ? `toggleSelectProspect('${p.mls}')` : `openProspectModal('${p.id}')`;
   return `<div class="prospect-card${sel}" onclick="${clickFn}">
@@ -319,7 +358,7 @@ function prospectCard(p) {
       <div class="card-main">
         <div class="card-name">${(p.owners || []).map(o => o.name).join(", ")}</div>
         <div class="card-addr">${p.owners?.[0]?.street || ""}, ${p.owners?.[0]?.city || ""}</div>
-        <div class="card-mls">MLS #${p.mls} · Expires ${p.expiry || "—"} · ${municipality}</div>
+        <div class="card-mls">MLS #${p.mls} · Expires ${p.expiry || "—"} · 📍 ${municipality}</div>
       </div>
     </div>
     <div class="card-meta">${statusBadge}${typeBadge}<span class="badge badge-red">${p.status || "Expiré"}</span></div>
@@ -457,7 +496,6 @@ async function logActivity(prospectId, action) {
   });
 }
 
-// ── Duplicate check ────────────────────────────────────────
 function findDuplicates(mlsList) {
   return mlsList.filter(mls => allProspects.some(p => p.mls === mls));
 }
@@ -480,7 +518,7 @@ function showDuplicateWarning(duplicates, onProceed, onSkip) {
       <p style="font-size:13px;color:var(--amber);font-weight:500;">The following prospects are already in your database:</p>
     </div>
     <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px;">${dupList}</div>
-    <p style="font-size:13px;color:var(--text-2);margin-bottom:16px;">What would you like to do with the duplicate${duplicates.length > 1 ? "s" : ""}?</p>
+    <p style="font-size:13px;color:var(--text-2);margin-bottom:16px;">What would you like to do?</p>
     <div style="display:flex;flex-direction:column;gap:10px;">
       <button onclick="(${onSkip.toString()})()" style="padding:10px 16px;border-radius:var(--radius);border:1px solid var(--border-med);background:var(--surface);color:var(--text);font-size:13px;font-family:var(--font);cursor:pointer;text-align:left;">
         <strong>Skip duplicates</strong><br>
@@ -498,7 +536,6 @@ function showDuplicateWarning(duplicates, onProceed, onSkip) {
   openModal("prospectModal");
 }
 
-// ── Add Prospect ───────────────────────────────────────────
 window.openAddProspect = function (tab) {
   tab = tab || "single";
   document.getElementById("addProspectContent").innerHTML = `
@@ -683,7 +720,6 @@ window.saveNewProspect = async function () {
     e.textContent = "MLS # and at least one owner name are required.";
     e.style.display = "block"; return;
   }
-  const duplicates = findDuplicates([mls]);
   const owners = [{ name: o1name, street: g("ap_o1street"), city: g("ap_o1city"), postal: g("ap_o1postal") }];
   if (g("ap_o2name")) owners.push({ name: g("ap_o2name"), street: g("ap_o2street"), city: g("ap_o2city"), postal: g("ap_o2postal") });
   const formData = {
@@ -693,6 +729,7 @@ window.saveNewProspect = async function () {
     prevPrice: g("ap_prevPrice") ? Number(g("ap_prevPrice")) : null,
     agency: g("ap_agency"), broker: g("ap_broker"), brokerPhone: g("ap_phone"), owners
   };
+  const duplicates = findDuplicates([mls]);
   if (duplicates.length > 0) {
     closeAllModals();
     showDuplicateWarning(
