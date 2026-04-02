@@ -138,7 +138,6 @@ function updateProspectCount() {
     `${allProspects.length} expired listing${allProspects.length !== 1 ? "s" : ""}`;
 }
 
-// ── Filter Bar ─────────────────────────────────────────────
 function renderFilterBar() {
   const bar = document.getElementById("filterBar");
   if (!bar) return;
@@ -155,24 +154,19 @@ function renderFilterBar() {
   const municipalities = getMunicipalities();
   const muniButtons = municipalities.map(m => {
     const active = selectedMunicipalities.has(m);
-    return `<button onclick="toggleMunicipality('${m}')" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;white-space:nowrap;border:1px solid ${active ? 'var(--accent)' : 'var(--border-med)'};background:${active ? 'var(--accent)' : 'var(--surface)'};color:${active ? '#fff' : 'var(--text-2)'};font-weight:${active ? '500' : '400'};transition:all 0.15s;">
-      ${active ? '✓ ' : ''}${m}
-    </button>`;
+    return `<button onclick="toggleMunicipality('${m}')" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;white-space:nowrap;border:1px solid ${active ? 'var(--accent)' : 'var(--border-med)'};background:${active ? 'var(--accent)' : 'var(--surface)'};color:${active ? '#fff' : 'var(--text-2)'};font-weight:${active ? '500' : '400'};transition:all 0.15s;">${active ? '✓ ' : ''}${m}</button>`;
   }).join("");
 
   bar.innerHTML = `
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:${isFilterOpen || isMuniOpen ? '0' : '16px'};">
-
       <button onclick="toggleFilterPanel()" style="display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:99px;font-size:13px;font-family:var(--font);cursor:pointer;border:1px solid ${hasFilters ? 'var(--accent)' : 'var(--border-med)'};background:${hasFilters ? 'var(--accent-light)' : 'var(--surface)'};color:${hasFilters ? 'var(--accent)' : 'var(--text-2)'};font-weight:${hasFilters ? '500' : '400'};">
         <span>⚙ Filters${hasFilters ? ' (active)' : ''}</span>
         <span style="font-size:10px;">${isFilterOpen ? '▲' : '▼'}</span>
       </button>
-
       <button onclick="toggleMuniPanel()" style="display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:99px;font-size:13px;font-family:var(--font);cursor:pointer;border:1px solid ${hasMuni ? 'var(--accent)' : 'var(--border-med)'};background:${hasMuni ? 'var(--accent-light)' : 'var(--surface)'};color:${hasMuni ? 'var(--accent)' : 'var(--text-2)'};font-weight:${hasMuni ? '500' : '400'};">
         <span>📍 Municipality${hasMuni ? ` (${selectedMunicipalities.size})` : ''}</span>
         <span style="font-size:10px;">${isMuniOpen ? '▲' : '▼'}</span>
       </button>
-
       ${hasFilters || hasMuni ? `<button onclick="resetAll()" style="padding:7px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;border:1px solid var(--red-bg);background:var(--red-bg);color:var(--red);font-weight:500;">✕ Reset all</button>` : ""}
     </div>
 
