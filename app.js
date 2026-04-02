@@ -699,7 +699,7 @@ window.startBulkImport = function() {
   }
 };
 
-async function doImport(rows, skipDuplicates) {
+window.doImport = async function(rows, skipDuplicates) {
   const hdrs = ["mls","status","listingaddress","contractstart","expiry","lastprice","origprice","prevprice","agency","broker","brokerphone","owner1name","owner1street","owner1city","owner1postal","owner2name","owner2street","owner2city","owner2postal"];
   let imported = 0; let skipped = 0; let failed = 0;
   for (const row of rows) {
