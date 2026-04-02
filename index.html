@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>ProspectTrack — Real Estate CRM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- LOGIN SCREEN -->
+  <div id="loginScreen" class="screen active">
+    <div class="login-wrap">
+      <div class="login-brand">
+        <div class="brand-icon">PT</div>
+        <h1 class="brand-name">ProspectTrack</h1>
+        <p class="brand-sub">Real Estate Prospecting CRM</p>
+      </div>
+      <div class="login-card">
+        <h2>Sign in</h2>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="loginEmail" placeholder="you@example.com" autocomplete="email" />
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password" />
+        </div>
+        <div id="loginError" class="error-msg" style="display:none;"></div>
+        <button class="btn-primary" id="loginBtn" onclick="handleLogin()">Sign in</button>
+      </div>
+      <p class="login-footer">Contact your team leader to get access.</p>
+    </div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="appScreen" class="screen">
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-icon sm">PT</div>
+        <span>ProspectTrack</span>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="#" class="nav-item active" data-view="prospects" onclick="switchView('prospects',this)">
+          <span class="nav-icon">◈</span> Prospects
+        </a>
+        <a href="#" class="nav-item" data-view="dashboard" id="dashNav" onclick="switchView('dashboard',this)" style="display:none;">
+          <span class="nav-icon">◉</span> Dashboard
+        </a>
+        <a href="#" class="nav-item" data-view="admin" id="adminNav" onclick="switchView('admin',this)" style="display:none;">
+          <span class="nav-icon">◎</span> Admin
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="user-pill" id="userPill"></div>
+        <button class="btn-ghost" onclick="handleLogout()">Sign out</button>
+      </div>
+    </aside>
+
+    <!-- MOBILE HEADER -->
+    <header class="mobile-header">
+      <div class="brand-icon sm">PT</div>
+      <span class="mobile-title" id="mobileTitle">Prospects</span>
+      <button class="hamburger" onclick="toggleMobileNav()" id="hamburger">☰</button>
+    </header>
+
+    <!-- MOBILE NAV DRAWER -->
+    <div class="mobile-drawer" id="mobileDrawer">
+      <nav>
+        <a href="#" class="nav-item active" data-view="prospects" onclick="switchView('prospects',this);closeMobileNav()">◈ Prospects</a>
+        <a href="#" class="nav-item" data-view="dashboard" id="dashNavMobile" onclick="switchView('dashboard',this);closeMobileNav()" style="display:none;">◉ Dashboard</a>
+        <a href="#" class="nav-item" data-view="admin" id="adminNavMobile" onclick="switchView('admin',this);closeMobileNav()" style="display:none;">◎ Admin</a>
+        <hr style="border-color:rgba(255,255,255,0.1);margin:12px 0;" />
+        <a href="#" class="nav-item" onclick="handleLogout()">→ Sign out</a>
+      </nav>
+      <div id="mobileUserPill" style="padding:12px 16px;font-size:12px;opacity:0.5;"></div>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+
+      <!-- PROSPECTS VIEW -->
+      <div id="view-prospects" class="view active">
+        <div class="view-header">
+          <div>
+            <h2 class="view-title">Prospects</h2>
+            <p class="view-sub" id="prospectCount">Loading...</p>
+          </div>
+          <div class="header-actions">
+            <input type="text" class="search-input" id="searchInput" placeholder="Search..." oninput="renderProspects()" />
+            <button class="btn-secondary" id="exportModeBtn" onclick="startExportMode()">Export Labels ↓</button>
+            <button class="btn-primary" id="addProspectBtn" onclick="openAddProspect()" style="display:none;">+ Add Prospect</button>
+          </div>
+        </div>
+
+        <!-- Export selection banner -->
+        <div class="sel-banner" id="selBanner">
+          <span class="sel-text" id="selText">0 selected</span>
+          <button class="btn-ghost-sm" onclick="selectAllProspects()">Select all</button>
+          <button class="btn-ghost-sm" onclick="clearSelection()">Clear</button>
+          <button class="btn-ghost-sm" onclick="cancelExportMode()">Cancel</button>
+          <button class="btn-confirm" id="confirmExportBtn" onclick="showExportConfirm()" disabled>Confirm & Export ↓</button>
+        </div>
+
+        <div id="prospectsContainer"></div>
+      </div>
+
+      <!-- DASHBOARD VIEW (admin only) -->
+      <div id="view-dashboard" class="view">
+        <div class="view-header">
+          <div>
+            <h2 class="view-title">Team Dashboard</h2>
+            <p class="view-sub">Live activity across all agents</p>
+          </div>
+        </div>
+        <div id="dashboardContent"></div>
+      </div>
+
+      <!-- ADMIN VIEW -->
+      <div id="view-admin" class="view">
+        <div class="view-header">
+          <div>
+            <h2 class="view-title">Admin</h2>
+            <p class="view-sub">Manage team access</p>
+          </div>
+          <button class="btn-primary" onclick="openInviteAgent()">+ Invite Agent</button>
+        </div>
+        <div id="adminContent"></div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- MODALS -->
+  <div class="modal-overlay" id="modalOverlay" onclick="closeAllModals(event)">
+
+    <!-- Prospect Detail Modal -->
+    <div class="modal" id="prospectModal">
+      <div id="prospectModalContent"></div>
+    </div>
+
+    <!-- Add Prospect Modal (admin) -->
+    <div class="modal modal-sm" id="addProspectModal">
+      <div id="addProspectContent"></div>
+    </div>
+
+    <!-- Visit Log Modal -->
+    <div class="modal modal-sm" id="visitModal">
+      <div id="visitModalContent"></div>
+    </div>
+
+    <!-- Export Confirm Modal -->
+    <div class="modal modal-sm" id="exportModal">
+      <div id="exportModalContent"></div>
+    </div>
+
+    <!-- Invite Agent Modal -->
+    <div class="modal modal-sm" id="inviteModal">
+      <div id="inviteModalContent"></div>
+    </div>
+
+  </div>
+
+  <!-- Firebase SDKs -->
+  <script type="module" src="js/firebase-config.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
