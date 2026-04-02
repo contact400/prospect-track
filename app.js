@@ -17,11 +17,7 @@ let selectedMLS = new Set();
 let unsubscribeProspects = null;
 let activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all", type: "all" };
 let selectedMunicipalities = new Set();
-
-// Duplicate resolution state
-let pendingImportRows = [];
-let pendingImportSkip = false;
-let pendingSingleData = null;
+let dupReviewMode = false;
 
 function detectPropertyType(address) {
   if (!address) return "house";
@@ -40,6 +36,16 @@ function extractMunicipality(address) {
 function getMunicipalities() {
   const set = new Set(allProspects.map(p => extractMunicipality(p.listingAddress)));
   return [...set].filter(m => m && m !== "Unknown").sort();
+}
+
+function findDuplicateMLS() {
+  const seen = {};
+  const dups = new Set();
+  allProspects.forEach(p => {
+    if (seen[p.mls]) dups.add(p.mls);
+    else seen[p.mls] = true;
+  });
+  return dups;
 }
 
 onAuthStateChanged(auth, async (user) => {
@@ -313,6 +319,10 @@ window.renderProspects = function () {
   const filtered = getFilteredAndSorted();
   const container = document.getElementById("prospectsContainer");
   const hasActive = activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all" || activeFilters.type !== "all" || selectedMunicipalities.size > 0;
+
+  // Dup review mode banner
+  const dupIds = dupReviewMode ? new Set(getDupProspects().map(p => p.id)) : new Set();
+
   if (!filtered.length) {
     container.innerHTML = `<div class="empty-state"><div class="empty-icon">◎</div>
       <div class="empty-title">${hasActive ? "No prospects match these filters" : "No prospects found"}</div>
@@ -320,10 +330,15 @@ window.renderProspects = function () {
     </div>`;
     return;
   }
-  container.innerHTML = `<div class="prospects-grid">${filtered.map(p => prospectCard(p)).join("")}</div>`;
+  container.innerHTML = `<div class="prospects-grid">${filtered.map(p => prospectCard(p, dupIds.has(p.id))).join("")}</div>`;
 };
 
-function prospectCard(p) {
+function getDupProspects() {
+  const dupMLS = findDuplicateMLS();
+  return allProspects.filter(p => dupMLS.has(p.mls));
+}
+
+function prospectCard(p, isDup) {
   const initials = (p.owners?.[0]?.name || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
   const lastPrice = p.lastPrice ? "$" + Number(p.lastPrice).toLocaleString("fr-CA") : "—";
   const priceDrop = p.prevPrice ? `<span class="price-drop">↓ from $${Number(p.prevPrice).toLocaleString("fr-CA")}</span>` : "";
@@ -340,9 +355,19 @@ function prospectCard(p) {
   const typeBadge = propType === "condo"
     ? `<span class="badge" style="background:#EEEDFE;color:#3C3489;">🏢 Condo</span>`
     : `<span class="badge" style="background:#EAF3DE;color:#2D6A4F;">🏠 House</span>`;
-  const sel = selectedMLS.has(p.mls) ? " selected" : "";
-  const clickFn = exportMode ? `toggleSelectProspect('${p.mls}')` : `openProspectModal('${p.id}')`;
-  return `<div class="prospect-card${sel}" onclick="${clickFn}">
+  const dupBadge = isDup ? `<span class="badge" style="background:var(--amber-bg);color:var(--amber);">⚠ Potential duplicate</span>` : "";
+  const dupSelect = dupReviewMode && isDup ? `
+    <div style="position:absolute;top:12px;right:12px;">
+      <input type="checkbox" ${selectedMLS.has(p.id) ? 'checked' : ''} 
+        onclick="event.stopPropagation();toggleDupSelect('${p.id}')" 
+        style="width:16px;height:16px;cursor:pointer;accent-color:var(--red);" />
+    </div>` : "";
+  const sel = (dupReviewMode && selectedMLS.has(p.id)) ? " selected" : "";
+  const cardStyle = isDup && dupReviewMode ? ' style="border-color:var(--amber);background:var(--amber-bg);"' : '';
+  const clickFn = dupReviewMode && isDup ? `toggleDupSelect('${p.id}')` : exportMode ? `toggleSelectProspect('${p.mls}')` : `openProspectModal('${p.id}')`;
+
+  return `<div class="prospect-card${sel}" onclick="${clickFn}"${cardStyle} style="position:relative;${isDup && dupReviewMode ? 'border-color:#E9A000;background:#FDF3E7;' : ''}">
+    ${dupSelect}
     <div class="card-top">
       <div class="card-avatar">${initials}</div>
       <div class="card-main">
@@ -351,7 +376,7 @@ function prospectCard(p) {
         <div class="card-mls">MLS #${p.mls} · Expires ${p.expiry || "—"} · 📍 ${municipality}</div>
       </div>
     </div>
-    <div class="card-meta">${statusBadge}${typeBadge}<span class="badge badge-red">${p.status || "Expiré"}</span></div>
+    <div class="card-meta">${statusBadge}${typeBadge}${dupBadge}<span class="badge badge-red">${p.status || "Expiré"}</span></div>
     <div class="card-tracking">
       <div class="track-item"><div class="track-label">Last price</div><div class="track-value">${lastPrice} ${priceDrop}</div></div>
       <div class="track-item"><div class="track-label">Mailings</div><div class="track-value">${mailings}/4</div></div>
@@ -360,8 +385,74 @@ function prospectCard(p) {
   </div>`;
 }
 
+// ── Duplicate review mode ──────────────────────────────────
+window.startDupReview = function() {
+  const dups = getDupProspects();
+  if (dups.length === 0) { showToast("No duplicates found in your database"); return; }
+  dupReviewMode = true;
+  selectedMLS.clear();
+  renderProspects();
+  renderDupBanner();
+};
+
+window.cancelDupReview = function() {
+  dupReviewMode = false;
+  selectedMLS.clear();
+  renderProspects();
+  const banner = document.getElementById("dupBanner");
+  if (banner) banner.style.display = "none";
+};
+
+window.toggleDupSelect = function(id) {
+  if (selectedMLS.has(id)) selectedMLS.delete(id);
+  else selectedMLS.add(id);
+  renderDupBanner();
+  renderProspects();
+};
+
+window.selectAllDups = function() {
+  getDupProspects().forEach(p => selectedMLS.add(p.id));
+  renderDupBanner();
+  renderProspects();
+};
+
+function renderDupBanner() {
+  const banner = document.getElementById("dupBanner");
+  if (!banner) return;
+  const dups = getDupProspects();
+  const n = selectedMLS.size;
+  banner.style.display = "flex";
+  banner.innerHTML = `
+    <span style="font-size:13px;color:#fff;font-weight:500;flex:1;">⚠ ${dups.length} potential duplicate${dups.length !== 1 ? "s" : ""} found · ${n} selected</span>
+    <button onclick="selectAllDups()" class="btn-ghost-sm">Select all</button>
+    <button onclick="clearDupSelection()" class="btn-ghost-sm">Clear</button>
+    <button onclick="cancelDupReview()" class="btn-ghost-sm">Cancel</button>
+    <button onclick="deleteSelectedDups()" style="padding:6px 12px;border-radius:var(--radius);background:var(--red-bg);color:var(--red);border:1px solid rgba(155,35,53,0.2);font-size:12px;font-family:var(--font);cursor:pointer;font-weight:500;${n === 0 ? 'opacity:0.4;cursor:not-allowed;' : ''}">🗑 Delete selected (${n})</button>
+  `;
+}
+
+window.clearDupSelection = function() {
+  selectedMLS.clear();
+  renderDupBanner();
+  renderProspects();
+};
+
+window.deleteSelectedDups = async function() {
+  if (selectedMLS.size === 0) return;
+  if (!confirm(`Permanently delete ${selectedMLS.size} prospect${selectedMLS.size !== 1 ? "s" : ""}? This cannot be undone.`)) return;
+  const ids = [...selectedMLS];
+  for (const id of ids) {
+    await deleteDoc(doc(db, "prospects", id));
+  }
+  selectedMLS.clear();
+  dupReviewMode = false;
+  const banner = document.getElementById("dupBanner");
+  if (banner) banner.style.display = "none";
+  showToast(`Deleted ${ids.length} prospect${ids.length !== 1 ? "s" : ""}`);
+};
+
 window.openProspectModal = async function (id) {
-  if (exportMode) return;
+  if (exportMode || dupReviewMode) return;
   const p = allProspects.find(x => x.id === id);
   if (!p) return;
   renderProspectModal(p);
@@ -486,75 +577,6 @@ async function logActivity(prospectId, action) {
   });
 }
 
-// ── Duplicate handling ─────────────────────────────────────
-function findDuplicates(mlsList) {
-  return mlsList.filter(mls => allProspects.some(p => p.mls === mls));
-}
-
-function showDuplicateWarning(duplicates) {
-  const dupList = duplicates.map(mls => {
-    const existing = allProspects.find(p => p.mls === mls);
-    return `<div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:10px;align-items:center;">
-      <span style="background:var(--amber-bg);color:var(--amber);padding:2px 6px;border-radius:4px;font-weight:500;white-space:nowrap;">MLS ${mls}</span>
-      <span style="flex:1;">${(existing?.owners||[]).map(o=>o.name).join(", ")}</span>
-    </div>`;
-  }).join("");
-  document.getElementById("prospectModalContent").innerHTML = `
-    <div class="modal-header">
-      <div><div class="modal-title">Duplicate${duplicates.length > 1 ? "s" : ""} found</div>
-      <div class="modal-sub">${duplicates.length} MLS number${duplicates.length > 1 ? "s" : ""} already exist${duplicates.length === 1 ? "s" : ""} in your database</div></div>
-      <button class="close-x" onclick="closeAllModals()">×</button>
-    </div>
-    <div style="background:var(--amber-bg);border-radius:var(--radius);padding:12px 14px;margin-bottom:14px;">
-      <p style="font-size:13px;color:var(--amber);font-weight:500;">The following prospects are already in your database:</p>
-    </div>
-    <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px;">${dupList}</div>
-    <p style="font-size:13px;color:var(--text-2);margin-bottom:16px;">What would you like to do?</p>
-    <div style="display:flex;flex-direction:column;gap:10px;">
-      <button onclick="resolveDuplicate('skip')" style="padding:10px 16px;border-radius:var(--radius);border:1px solid var(--border-med);background:var(--surface);color:var(--text);font-size:13px;font-family:var(--font);cursor:pointer;text-align:left;">
-        <strong>Skip duplicates</strong><br>
-        <span style="font-size:12px;color:var(--text-3);">Import only new prospects, ignore the ${duplicates.length > 1 ? "ones" : "one"} already in the database</span>
-      </button>
-      <button onclick="resolveDuplicate('import')" style="padding:10px 16px;border-radius:var(--radius);border:1px solid var(--border-med);background:var(--surface);color:var(--text);font-size:13px;font-family:var(--font);cursor:pointer;text-align:left;">
-        <strong>Import anyway</strong><br>
-        <span style="font-size:12px;color:var(--text-3);">Add all prospects including duplicates</span>
-      </button>
-      <button onclick="closeAllModals()" style="padding:10px 16px;border-radius:var(--radius);border:1px solid var(--border-med);background:var(--surface);color:var(--red);font-size:13px;font-family:var(--font);cursor:pointer;text-align:left;">
-        <strong>Cancel</strong><br>
-        <span style="font-size:12px;color:var(--text-3);">Go back without importing anything</span>
-      </button>
-    </div>`;
-  openModal("prospectModal");
-}
-
-window.resolveDuplicate = async function(choice) {
-  document.getElementById("modalOverlay").classList.remove("open");
-  document.querySelectorAll(".modal").forEach(m => m.classList.remove("active"));
-  
-  console.log("resolveDuplicate called:", choice);
-  console.log("pendingSingleData:", pendingSingleData);
-  console.log("pendingImportRows:", pendingImportRows.length);
-
-  if (pendingSingleData) {
-    const data = pendingSingleData;
-    pendingSingleData = null;
-    if (choice === 'import') {
-      showToast("Saving...");
-      await saveSingleProspect(data);
-    } else {
-      showToast("Skipped — prospect already exists");
-    }
-  } else if (pendingImportRows.length > 0) {
-    const rows = [...pendingImportRows];
-    pendingImportRows = [];
-    showToast("Importing...");
-    await doImport(rows, choice === 'skip');
-  } else {
-    showToast("Error — no pending data found");
-    console.log("ERROR: nothing pending");
-  }
-};
-// ── Add Prospect ───────────────────────────────────────────
 window.openAddProspect = function (tab) {
   tab = tab || "single";
   document.getElementById("addProspectContent").innerHTML = `
@@ -619,7 +641,7 @@ function bulkImportForm() {
     <div id="ap_error" class="error-msg" style="display:none;margin-top:8px;"></div>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="closeAllModals()">Cancel</button>
-      <button class="btn-primary" id="importBtn" style="width:auto;padding:9px 20px;display:none;" onclick="startBulkImport()">Import All</button>
+      <button class="btn-primary" id="importBtn" style="width:auto;padding:9px 20px;display:none;" onclick="runBulkImport()">Import All</button>
     </div>`;
 }
 
@@ -645,22 +667,17 @@ window.previewCSV = function(input) {
     const preview = parsedCSVRows.map(row => {
       const mls = get(row,"mls"); const owner = get(row,"owner1name");
       const addr = get(row,"listingaddress"); const price = get(row,"lastprice");
-      const isDup = allProspects.some(p => p.mls === mls);
       const ptype = detectPropertyType(addr);
       const muni = extractMunicipality(addr);
       return `<div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <span style="background:${isDup ? 'var(--amber-bg)' : 'var(--accent-light)'};color:${isDup ? 'var(--amber)' : 'var(--accent)'};padding:2px 6px;border-radius:4px;font-weight:500;white-space:nowrap;">MLS ${mls}${isDup ? ' ⚠' : ''}</span>
+        <span style="background:var(--accent-light);color:var(--accent);padding:2px 6px;border-radius:4px;font-weight:500;white-space:nowrap;">MLS ${mls}</span>
         <span style="flex:1;">${owner}</span>
         <span style="background:${ptype==='condo'?'#EEEDFE':'#EAF3DE'};color:${ptype==='condo'?'#3C3489':'#2D6A4F'};padding:2px 6px;border-radius:4px;font-size:11px;">${ptype==='condo'?'🏢':'🏠'} ${ptype}</span>
         <span style="color:var(--text-3);font-size:11px;">📍${muni}</span>
         <span style="color:var(--text-3);">$${Number(price).toLocaleString("fr-CA")}</span>
       </div>`;
     }).join("");
-    const dupCount = parsedCSVRows.filter(row => {
-      const idx = headers.indexOf("mls"); const mls = idx >= 0 ? (row[idx]||"").trim() : "";
-      return allProspects.some(p => p.mls === mls);
-    }).length;
-    document.getElementById("csvPreviewLabel").textContent = parsedCSVRows.length + " prospect(s) ready to import" + (dupCount > 0 ? ` · ⚠ ${dupCount} duplicate${dupCount > 1 ? "s" : ""} detected` : "");
+    document.getElementById("csvPreviewLabel").textContent = parsedCSVRows.length + " prospect(s) ready to import";
     document.getElementById("csvPreviewList").innerHTML = preview;
     document.getElementById("csvPreview").style.display = "block";
     document.getElementById("importBtn").style.display = "block";
@@ -684,30 +701,16 @@ function parseCSV(text) {
   return rows;
 }
 
-window.startBulkImport = function() {
+window.runBulkImport = async function() {
+  const btn = document.getElementById("importBtn");
+  if (btn) { btn.textContent = "Importing..."; btn.disabled = true; }
   const hdrs = ["mls","status","listingaddress","contractstart","expiry","lastprice","origprice","prevprice","agency","broker","brokerphone","owner1name","owner1street","owner1city","owner1postal","owner2name","owner2street","owner2city","owner2postal"];
-  const get = (row, col) => { const i = hdrs.indexOf(col); return i >= 0 ? (row[i]||"").trim() : ""; };
-  const mlsList = parsedCSVRows.map(row => get(row, "mls")).filter(Boolean);
-  const duplicates = findDuplicates(mlsList);
-  if (duplicates.length > 0) {
-    pendingImportRows = parsedCSVRows;
-    pendingSingleData = null;
-    closeAllModals();
-    showDuplicateWarning(duplicates);
-  } else {
-    doImport(parsedCSVRows, false);
-  }
-};
-
-window.doImport = async function(rows, skipDuplicates) {
-  const hdrs = ["mls","status","listingaddress","contractstart","expiry","lastprice","origprice","prevprice","agency","broker","brokerphone","owner1name","owner1street","owner1city","owner1postal","owner2name","owner2street","owner2city","owner2postal"];
-  let imported = 0; let skipped = 0; let failed = 0;
-  for (const row of rows) {
+  let imported = 0; let failed = 0;
+  for (const row of parsedCSVRows) {
     try {
       const get = col => { const i = hdrs.indexOf(col); return i >= 0 ? (row[i]||"").trim() : ""; };
       const mls = get("mls");
       if (!mls || !get("owner1name")) { failed++; continue; }
-      if (skipDuplicates && allProspects.some(p => p.mls === mls)) { skipped++; continue; }
       const owners = [{name:get("owner1name"),street:get("owner1street"),city:get("owner1city"),postal:get("owner1postal")}];
       if (get("owner2name")) owners.push({name:get("owner2name"),street:get("owner2street"),city:get("owner2city"),postal:get("owner2postal")});
       await addDoc(collection(db,"prospects"), {
@@ -722,11 +725,14 @@ window.doImport = async function(rows, skipDuplicates) {
       imported++;
     } catch(e) { failed++; }
   }
-  let msg = `Imported ${imported} prospect(s)`;
-  if (skipped) msg += ` · ${skipped} duplicate${skipped > 1 ? "s" : ""} skipped`;
-  if (failed) msg += ` · ${failed} failed`;
-  showToast(msg);
-}
+  closeAllModals();
+  showToast(`Imported ${imported} prospect(s)${failed ? ` · ${failed} failed` : ""}`);
+  // Auto-check for duplicates after import
+  setTimeout(() => {
+    const dups = getDupProspects();
+    if (dups.length > 0) showToast(`⚠ ${dups.length} potential duplicate${dups.length !== 1 ? "s" : ""} detected — use the Duplicates button to review`);
+  }, 2000);
+};
 
 window.saveNewProspect = async function () {
   const g = id => document.getElementById(id)?.value?.trim();
@@ -738,32 +744,18 @@ window.saveNewProspect = async function () {
   }
   const owners = [{ name: o1name, street: g("ap_o1street"), city: g("ap_o1city"), postal: g("ap_o1postal") }];
   if (g("ap_o2name")) owners.push({ name: g("ap_o2name"), street: g("ap_o2street"), city: g("ap_o2city"), postal: g("ap_o2postal") });
-  const formData = {
+  await addDoc(collection(db, "prospects"), {
     mls, status: g("ap_status"), listingAddress: g("ap_listingAddr"),
     contractStart: g("ap_start"), expiry: g("ap_expiry"),
     lastPrice: Number(g("ap_price")) || 0, origPrice: Number(g("ap_origPrice")) || 0,
     prevPrice: g("ap_prevPrice") ? Number(g("ap_prevPrice")) : null,
-    agency: g("ap_agency"), broker: g("ap_broker"), brokerPhone: g("ap_phone"), owners
-  };
-  const duplicates = findDuplicates([mls]);
-  if (duplicates.length > 0) {
-    pendingSingleData = formData;
-    pendingImportRows = [];
-    closeAllModals();
-    showDuplicateWarning(duplicates);
-  } else {
-    await saveSingleProspect(formData);
-  }
-};
-
-async function saveSingleProspect(data) {
-  await addDoc(collection(db, "prospects"), {
-    ...data, mail: ["","","",""], visits: [],
+    agency: g("ap_agency"), broker: g("ap_broker"), brokerPhone: g("ap_phone"),
+    owners, mail: ["","","",""], visits: [],
     createdAt: serverTimestamp(), createdBy: currentUser.uid
   });
   closeAllModals();
   showToast("Prospect added successfully");
-}
+};
 
 window.deleteProspect = async function (id) {
   if (!confirm("Delete this prospect? This cannot be undone.")) return;
@@ -856,6 +848,7 @@ async function renderDashboard() {
   const totalVisits = allProspects.reduce((s, p) => s + (p.visits || []).length, 0);
   const evalsBooked = allProspects.filter(p => (p.visits || []).some(v => v.evalBooked === "yes")).length;
   const contacted = allProspects.filter(p => (p.visits || []).some(v => v.contact === "yes")).length;
+  const dupCount = getDupProspects().length;
   let activityHtml = '<p style="font-size:13px;color:var(--text-3);">No activity yet.</p>';
   try {
     const actSnap = await getDocs(query(collection(db, "activity"), orderBy("timestamp", "desc")));
@@ -901,6 +894,7 @@ async function renderDashboard() {
       <div class="stat-card"><div class="stat-label">Door visits</div><div class="stat-value">${totalVisits}</div></div>
       <div class="stat-card"><div class="stat-label">Contacts made</div><div class="stat-value">${contacted}</div></div>
       <div class="stat-card"><div class="stat-label">Evals booked</div><div class="stat-value">${evalsBooked}</div></div>
+      ${dupCount > 0 ? `<div class="stat-card" style="border-color:var(--amber);background:var(--amber-bg);cursor:pointer;" onclick="switchView('prospects');startDupReview()"><div class="stat-label" style="color:var(--amber);">⚠ Duplicates</div><div class="stat-value" style="color:var(--amber);">${dupCount}</div><div class="stat-sub" style="color:var(--amber);">Click to review</div></div>` : ""}
     </div>
     <div class="section-title" style="margin-bottom:12px;">Agent activity</div>
     ${agentCardsHtml}
