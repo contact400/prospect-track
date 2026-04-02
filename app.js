@@ -7,7 +7,6 @@ import {
   onSnapshot, query, orderBy, serverTimestamp, deleteDoc
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-// ── State ──────────────────────────────────────────────────
 let currentUser = null;
 let currentUserProfile = null;
 let isAdmin = false;
@@ -17,7 +16,6 @@ let exportMode = false;
 let selectedMLS = new Set();
 let unsubscribeProspects = null;
 
-// ── Auth ───────────────────────────────────────────────────
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     currentUser = user;
@@ -62,7 +60,6 @@ window.handleLogout = async function () {
   await signOut(auth);
 };
 
-// ── Screen helpers ─────────────────────────────────────────
 function showLogin() {
   document.getElementById("loginScreen").classList.add("active");
   document.getElementById("appScreen").classList.remove("active");
@@ -95,7 +92,6 @@ function setupRoleUI() {
   }
 }
 
-// ── Navigation ─────────────────────────────────────────────
 window.switchView = function (name, el) {
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
   document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
@@ -117,7 +113,6 @@ window.closeMobileNav = function () {
   document.getElementById("mobileDrawer").style.display = "none";
 };
 
-// ── Prospects ──────────────────────────────────────────────
 function subscribeToProspects() {
   const q = query(collection(db, "prospects"), orderBy("createdAt", "desc"));
   unsubscribeProspects = onSnapshot(q, (snap) => {
@@ -140,13 +135,11 @@ window.renderProspects = function () {
     const names = (p.owners || []).map(o => o.name).join(" ").toLowerCase();
     return p.mls?.includes(q) || p.listingAddress?.toLowerCase().includes(q) || names.includes(q);
   });
-
   const container = document.getElementById("prospectsContainer");
   if (!filtered.length) {
     container.innerHTML = `<div class="empty-state"><div class="empty-icon">◎</div><div class="empty-title">No prospects found</div><div class="empty-sub">${allProspects.length === 0 && isAdmin ? 'Add your first prospect using the button above.' : 'Try a different search.'}</div></div>`;
     return;
   }
-
   container.innerHTML = `<div class="prospects-grid">${filtered.map(p => prospectCard(p)).join("")}</div>`;
 };
 
@@ -158,7 +151,6 @@ function prospectCard(p) {
   const visits = (p.visits || []).length;
   const evalBooked = (p.visits || []).some(v => v.evalBooked === "yes");
   const contacted = (p.visits || []).some(v => v.contact === "yes");
-
   const statusBadge = evalBooked
     ? `<span class="badge badge-green">Eval booked</span>`
     : contacted
@@ -166,10 +158,8 @@ function prospectCard(p) {
     : mailings > 0
     ? `<span class="badge badge-amber">${mailings} mailing${mailings > 1 ? "s" : ""} sent</span>`
     : `<span class="badge badge-gray">Not contacted</span>`;
-
   const sel = selectedMLS.has(p.mls) ? " selected" : "";
   const clickFn = exportMode ? `toggleSelectProspect('${p.mls}')` : `openProspectModal('${p.id}')`;
-
   return `<div class="prospect-card${sel}" onclick="${clickFn}">
     <div class="card-top">
       <div class="card-avatar">${initials}</div>
@@ -191,7 +181,6 @@ function prospectCard(p) {
   </div>`;
 }
 
-// ── Prospect Detail Modal ──────────────────────────────────
 window.openProspectModal = async function (id) {
   if (exportMode) return;
   const p = allProspects.find(x => x.id === id);
@@ -207,14 +196,11 @@ function renderProspectModal(p) {
       <div class="on">${o.name}</div>
       <div class="oa">${o.street}<br>${o.city} &nbsp;${o.postal}</div>
     </div>`).join("");
-
   const mailHtml = [0,1,2,3].map(i => `
     <div class="mail-slot">
       <label>Mailing ${i+1}</label>
-      <input type="date" value="${(p.mail || [])[i] || ""}"
-        onchange="updateMailDate('${p.id}',${i},this.value)" />
+      <input type="date" value="${(p.mail || [])[i] || ""}" onchange="updateMailDate('${p.id}',${i},this.value)" />
     </div>`).join("");
-
   const visits = p.visits || [];
   const visitRows = visits.length === 0
     ? `<p style="font-size:13px;color:var(--text-3);padding:8px 0;">No visits logged yet.</p>`
@@ -222,25 +208,21 @@ function renderProspectModal(p) {
       visits.map((v, i) => `
         <div class="visit-entry">
           <input type="date" value="${v.date || ""}" onchange="updateVisitField('${p.id}',${i},'date',this.value)" />
-          <button class="yn-btn ${v.contact === 'yes' ? 'yes' : v.contact === 'no' ? 'no' : ''}"
-            onclick="cycleVisitField('${p.id}',${i},'contact')" title="Contact made?">
+          <button class="yn-btn ${v.contact === 'yes' ? 'yes' : v.contact === 'no' ? 'no' : ''}" onclick="cycleVisitField('${p.id}',${i},'contact')" title="Contact made?">
             ${v.contact === 'yes' ? '✓' : v.contact === 'no' ? '✕' : '—'}
             <span class="yn-label">Contact</span>
           </button>
-          <button class="yn-btn ${v.evalBooked === 'yes' ? 'yes' : v.evalBooked === 'no' ? 'no' : ''}"
-            onclick="cycleVisitField('${p.id}',${i},'evalBooked')" title="Eval booked?">
+          <button class="yn-btn ${v.evalBooked === 'yes' ? 'yes' : v.evalBooked === 'no' ? 'no' : ''}" onclick="cycleVisitField('${p.id}',${i},'evalBooked')" title="Eval booked?">
             ${v.evalBooked === 'yes' ? '✓' : v.evalBooked === 'no' ? '✕' : '—'}
             <span class="yn-label">Eval</span>
           </button>
           <button class="icon-btn red" onclick="removeVisit('${p.id}',${i})">✕</button>
         </div>`).join("");
-
   const adminActions = isAdmin ? `
     <div class="modal-section">
       <div class="modal-section-title">Admin</div>
       <button class="btn-danger" onclick="deleteProspect('${p.id}')">Delete prospect</button>
     </div>` : "";
-
   document.getElementById("prospectModalContent").innerHTML = `
     <div class="modal-header">
       <div>
@@ -279,7 +261,6 @@ function renderProspectModal(p) {
   `;
 }
 
-// ── Tracking Updates ───────────────────────────────────────
 window.updateMailDate = async function (id, idx, val) {
   const p = allProspects.find(x => x.id === id);
   if (!p) return;
@@ -337,7 +318,6 @@ async function logActivity(prospectId, action) {
   });
 }
 
-// ── Add Prospect (admin) ───────────────────────────────────
 window.openAddProspect = function (tab) {
   tab = tab || "single";
   document.getElementById("addProspectContent").innerHTML = `
@@ -365,7 +345,7 @@ function singleEntryForm() {
     <div class="form-group"><label>Expiry Date</label><input type="date" id="ap_expiry" /></div>
     <div class="form-group"><label>Last Price ($)</label><input type="number" id="ap_price" placeholder="540000" /></div>
     <div class="form-group"><label>Original Price ($)</label><input type="number" id="ap_origPrice" placeholder="540000" /></div>
-    <div class="form-group"><label>Previous Price ($)</label><input type="number" id="ap_prevPrice" placeholder="" /></div>
+    <div class="form-group"><label>Previous Price ($)</label><input type="number" id="ap_prevPrice" /></div>
     <div class="form-group"><label>Agency</label><input type="text" id="ap_agency" /></div>
     <div class="form-group"><label>Broker Name</label><input type="text" id="ap_broker" /></div>
     <div class="form-group"><label>Broker Phone</label><input type="text" id="ap_phone" /></div>
@@ -507,7 +487,6 @@ window.saveNewProspect = async function () {
   }
   const owners = [{ name: o1name, street: g("ap_o1street"), city: g("ap_o1city"), postal: g("ap_o1postal") }];
   if (g("ap_o2name")) owners.push({ name: g("ap_o2name"), street: g("ap_o2street"), city: g("ap_o2city"), postal: g("ap_o2postal") });
-
   await addDoc(collection(db, "prospects"), {
     mls, status: g("ap_status"), listingAddress: g("ap_listingAddr"),
     contractStart: g("ap_start"), expiry: g("ap_expiry"),
@@ -528,7 +507,6 @@ window.deleteProspect = async function (id) {
   showToast("Prospect deleted");
 };
 
-// ── Export / Selection ─────────────────────────────────────
 window.startExportMode = function () {
   exportMode = true;
   selectedMLS.clear();
@@ -598,10 +576,11 @@ window.showExportConfirm = function () {
 
 window.doExport = function () {
   const sel = allProspects.filter(p => selectedMLS.has(p.mls));
-  const rows = [["MLS #","Owner Name","Street","City","Province","Postal Code","Listing Address","Last Price","Expiry"]];
+  const rows = [["Name","Street","City","Province","Postal Code"]];
   sel.forEach(p => {
     (p.owners || []).forEach(o => {
-      rows.push([p.mls, o.name, o.street, o.city?.replace(/ \(.*\)/,"").trim(), "QC", o.postal, p.listingAddress, p.lastPrice, p.expiry]);
+      if (!o.name) return;
+      rows.push([o.name, o.street||"", o.city?.replace(/ \(.*\)/,"").trim()||"", "QC", o.postal||""]);
     });
   });
   const csv = rows.map(r => r.map(v => `"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
@@ -614,18 +593,14 @@ window.doExport = function () {
   showToast("Export downloaded");
 };
 
-// ── Dashboard (admin) ──────────────────────────────────────
 async function renderDashboard() {
   const el = document.getElementById("dashboardContent");
   if (!el) return;
-
   const totalProspects = allProspects.length;
   const totalMailings = allProspects.reduce((s, p) => s + (p.mail || []).filter(Boolean).length, 0);
   const totalVisits = allProspects.reduce((s, p) => s + (p.visits || []).length, 0);
   const evalsBooked = allProspects.filter(p => (p.visits || []).some(v => v.evalBooked === "yes")).length;
   const contacted = allProspects.filter(p => (p.visits || []).some(v => v.contact === "yes")).length;
-
-  // Recent activity
   let activityHtml = '<p style="font-size:13px;color:var(--text-3);">No activity yet.</p>';
   try {
     const actSnap = await getDocs(query(collection(db, "activity"), orderBy("timestamp", "desc")));
@@ -643,8 +618,6 @@ async function renderDashboard() {
       }).join("");
     }
   } catch(e) {}
-
-  // Per-agent stats
   const agentStats = {};
   allProspects.forEach(p => {
     (p.visits || []).forEach(v => {
@@ -656,7 +629,6 @@ async function renderDashboard() {
       if (v.evalBooked === "yes") agentStats[aid].evals++;
     });
   });
-
   const agentCardsHtml = Object.values(agentStats).length === 0
     ? '<p style="font-size:13px;color:var(--text-3);">No visit activity logged yet.</p>'
     : Object.values(agentStats).map(a => `
@@ -671,7 +643,6 @@ async function renderDashboard() {
           <div class="agent-stat"><div class="agent-stat-num">${a.evals}</div><div class="agent-stat-lbl">Evals</div></div>
         </div>
       </div>`).join("");
-
   el.innerHTML = `
     <div class="stats-grid">
       <div class="stat-card"><div class="stat-label">Prospects</div><div class="stat-value">${totalProspects}</div></div>
@@ -687,7 +658,6 @@ async function renderDashboard() {
   `;
 }
 
-// ── Admin panel ────────────────────────────────────────────
 async function loadAllUsers() {
   const snap = await getDocs(collection(db, "users"));
   allUsers = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
@@ -728,9 +698,6 @@ window.openInviteAgent = function () {
       <div class="modal-title">Add Agent</div>
       <button class="close-x" onclick="closeAllModals()">×</button>
     </div>
-    <p style="font-size:13px;color:var(--text-2);margin-bottom:16px;line-height:1.6;">
-      To add an agent, go to your Firebase Console and follow these steps:
-    </p>
     <ol style="font-size:13px;color:var(--text-2);line-height:2;padding-left:18px;">
       <li>Go to <strong>Authentication → Users → Add user</strong></li>
       <li>Enter the agent's email and a temporary password</li>
@@ -739,7 +706,6 @@ window.openInviteAgent = function () {
       <li>Create a new document with the UID as the document ID</li>
       <li>Add fields: <code>name</code>, <code>email</code>, <code>role: "agent"</code></li>
     </ol>
-    <p style="font-size:12px;color:var(--text-3);margin-top:12px;">The agent can change their password after first login via Firebase Auth settings.</p>
     <div class="modal-actions">
       <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="closeAllModals()">Got it</button>
     </div>
@@ -747,7 +713,6 @@ window.openInviteAgent = function () {
   openModal("inviteModal");
 };
 
-// ── Modal helpers ──────────────────────────────────────────
 function openModal(id) {
   document.querySelectorAll(".modal").forEach(m => m.classList.remove("active"));
   document.getElementById(id).classList.add("active");
@@ -760,7 +725,6 @@ window.closeAllModals = function (e) {
   document.querySelectorAll(".modal").forEach(m => m.classList.remove("active"));
 };
 
-// ── Toast ──────────────────────────────────────────────────
 function showToast(msg) {
   let t = document.querySelector(".toast");
   if (!t) { t = document.createElement("div"); t.className = "toast"; document.body.appendChild(t); }
@@ -769,7 +733,6 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove("show"), 2500);
 }
 
-// Allow clicking X button to close without event target check
 document.addEventListener("click", e => {
   if (e.target.classList.contains("close-x")) {
     document.getElementById("modalOverlay").classList.remove("open");
