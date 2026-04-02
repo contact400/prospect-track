@@ -530,10 +530,16 @@ function showDuplicateWarning(duplicates) {
 window.resolveDuplicate = async function(choice) {
   document.getElementById("modalOverlay").classList.remove("open");
   document.querySelectorAll(".modal").forEach(m => m.classList.remove("active"));
+  
+  console.log("resolveDuplicate called:", choice);
+  console.log("pendingSingleData:", pendingSingleData);
+  console.log("pendingImportRows:", pendingImportRows.length);
+
   if (pendingSingleData) {
     const data = pendingSingleData;
     pendingSingleData = null;
     if (choice === 'import') {
+      showToast("Saving...");
       await saveSingleProspect(data);
     } else {
       showToast("Skipped — prospect already exists");
@@ -541,10 +547,13 @@ window.resolveDuplicate = async function(choice) {
   } else if (pendingImportRows.length > 0) {
     const rows = [...pendingImportRows];
     pendingImportRows = [];
+    showToast("Importing...");
     await doImport(rows, choice === 'skip');
+  } else {
+    showToast("Error — no pending data found");
+    console.log("ERROR: nothing pending");
   }
 };
-
 // ── Add Prospect ───────────────────────────────────────────
 window.openAddProspect = function (tab) {
   tab = tab || "single";
