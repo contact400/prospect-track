@@ -79,6 +79,7 @@
           <div class="header-actions">
             <input type="text" class="search-input" id="searchInput" placeholder="Search..." oninput="renderProspects()" />
             <button class="btn-secondary" id="exportModeBtn" onclick="startExportMode()">Export Labels ↓</button>
+            <button class="btn-secondary" id="dupBtn" onclick="startDupReview()" style="border-color:#E9A000;color:#7A4F1D;">⚠ Duplicates</button>
             <button class="btn-primary" id="addProspectBtn" onclick="openAddProspect()" style="display:none;">+ Add Prospect</button>
           </div>
         </div>
@@ -89,7 +90,17 @@
           <button class="btn-ghost-sm" onclick="cancelExportMode()">Cancel</button>
           <button class="btn-confirm" id="confirmExportBtn" onclick="showExportConfirm()" disabled>Confirm & Export ↓</button>
         </div>
-      <div id="filterBar"></div>
+<div id="dupBanner" style="display:none;align-items:center;gap:10px;padding:10px 14px;background:#E9A000;border-radius:10px;margin-bottom:12px;flex-wrap:wrap;"></div>
+<div id="filterBar"></div>
+```
+
+---
+
+**Step 3 — Update index.html (Part 2: add Duplicates button)**
+
+5. Still in the same edit, press **Ctrl+F** and search for:
+```
+Export Labels ↓
         <div id="prospectsContainer"></div>
       </div>
       <div id="view-dashboard" class="view">
