@@ -45,6 +45,9 @@
         <a href="#" class="nav-item" data-view="targets" onclick="switchView('targets',this)">
           <span class="nav-icon">🎯</span> <span id="targetsNavLabel">Today's Targets</span>
         </a>
+        <a href="#" class="nav-item" data-view="performance" onclick="switchView('performance',this)">
+          <span class="nav-icon">📈</span> My Performance
+        </a>
         <a href="#" class="nav-item" data-view="dashboard" id="dashNav" onclick="switchView('dashboard',this)" style="display:none;">
           <span class="nav-icon">◉</span> Dashboard
         </a>
@@ -66,6 +69,7 @@
       <nav>
         <a href="#" class="nav-item active" data-view="prospects" onclick="switchView('prospects',this);closeMobileNav()">◈ Prospects</a>
         <a href="#" class="nav-item" data-view="targets" onclick="switchView('targets',this);closeMobileNav()">🎯 <span id="targetsNavLabelMobile">Today's Targets</span></a>
+        <a href="#" class="nav-item" data-view="performance" onclick="switchView('performance',this);closeMobileNav()">📈 My Performance</a>
         <a href="#" class="nav-item" data-view="dashboard" id="dashNavMobile" onclick="switchView('dashboard',this);closeMobileNav()" style="display:none;">◉ Dashboard</a>
         <a href="#" class="nav-item" data-view="admin" id="adminNavMobile" onclick="switchView('admin',this);closeMobileNav()" style="display:none;">◎ Admin</a>
         <hr style="border-color:rgba(255,255,255,0.1);margin:12px 0;" />
@@ -106,6 +110,15 @@
           </div>
         </div>
         <div id="targetsContent"></div>
+      </div>
+      <div id="view-performance" class="view">
+        <div class="view-header">
+          <div>
+            <h2 class="view-title">My Performance</h2>
+            <p class="view-sub">Monthly door targets &amp; commission tiers</p>
+          </div>
+        </div>
+        <div id="performanceContent"></div>
       </div>
       <div id="view-dashboard" class="view">
         <div class="view-header">
