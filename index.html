@@ -42,6 +42,9 @@
         <a href="#" class="nav-item active" data-view="prospects" onclick="switchView('prospects',this)">
           <span class="nav-icon">◈</span> Prospects
         </a>
+        <a href="#" class="nav-item" data-view="targets" onclick="switchView('targets',this)">
+          <span class="nav-icon">🎯</span> <span id="targetsNavLabel">Today's Targets</span>
+        </a>
         <a href="#" class="nav-item" data-view="dashboard" id="dashNav" onclick="switchView('dashboard',this)" style="display:none;">
           <span class="nav-icon">◉</span> Dashboard
         </a>
@@ -62,6 +65,7 @@
     <div class="mobile-drawer" id="mobileDrawer">
       <nav>
         <a href="#" class="nav-item active" data-view="prospects" onclick="switchView('prospects',this);closeMobileNav()">◈ Prospects</a>
+        <a href="#" class="nav-item" data-view="targets" onclick="switchView('targets',this);closeMobileNav()">🎯 <span id="targetsNavLabelMobile">Today's Targets</span></a>
         <a href="#" class="nav-item" data-view="dashboard" id="dashNavMobile" onclick="switchView('dashboard',this);closeMobileNav()" style="display:none;">◉ Dashboard</a>
         <a href="#" class="nav-item" data-view="admin" id="adminNavMobile" onclick="switchView('admin',this);closeMobileNav()" style="display:none;">◎ Admin</a>
         <hr style="border-color:rgba(255,255,255,0.1);margin:12px 0;" />
@@ -93,6 +97,15 @@
         <div id="dupBanner" style="display:none;align-items:center;gap:10px;padding:10px 14px;background:#E9A000;border-radius:10px;margin-bottom:12px;flex-wrap:wrap;"></div>
         <div id="filterBar"></div>
         <div id="prospectsContainer"></div>
+      </div>
+      <div id="view-targets" class="view">
+        <div class="view-header">
+          <div>
+            <h2 class="view-title">Today's Targets</h2>
+            <p class="view-sub">Your prospecting route for today</p>
+          </div>
+        </div>
+        <div id="targetsContent"></div>
       </div>
       <div id="view-dashboard" class="view">
         <div class="view-header">
