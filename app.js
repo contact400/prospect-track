@@ -21,6 +21,34 @@ let activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all",
 let selectedMunicipalities = new Set();
 let dupReviewMode = false;
 
+// ── Bonus structures ───────────────────────────────────────
+const BONUS_STRUCTURES = {
+  "benjamin": {
+    tiers: [
+      { doors: 120, sale: 33, purchase: 25, label: "Tier 1" },
+      { doors: 170, sale: 45, purchase: 35, label: "Tier 2" }
+    ]
+  },
+  "afshin": {
+    tiers: [
+      { doors: 100, sale: 55, purchase: 35, label: "Tier 1" },
+      { doors: 150, sale: 70, purchase: 50, label: "Tier 2" }
+    ]
+  },
+  "default": {
+    tiers: [
+      { doors: 100, sale: 33, purchase: 25, label: "Tier 1" },
+      { doors: 150, sale: 45, purchase: 35, label: "Tier 2" }
+    ]
+  }
+};
+
+function getBonusStructure(name) {
+  if (!name) return BONUS_STRUCTURES.default;
+  const key = name.toLowerCase().split(" ")[0];
+  return BONUS_STRUCTURES[key] || BONUS_STRUCTURES.default;
+}
+
 function detectPropertyType(address) {
   if (!address) return "house";
   const a = address.toLowerCase();
@@ -76,6 +104,43 @@ function getDupGroups() {
 
 function getTodayKey() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function getMonthKey(date) {
+  const d = date || new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// ── Visits & performance helpers ───────────────────────────
+function getVisitsForAgent(agentId, monthKey) {
+  let count = 0;
+  let evals = 0;
+  allProspects.forEach(p => {
+    (p.visits || []).forEach(v => {
+      if (v.agentId !== agentId) return;
+      if (!v.date) return;
+      const vMonth = v.date.slice(0, 7);
+      if (monthKey && vMonth !== monthKey) return;
+      count++;
+      if (v.evalBooked === "yes") evals++;
+    });
+  });
+  return { doors: count, evals };
+}
+
+function getMonthlyHistory(agentId) {
+  const months = {};
+  allProspects.forEach(p => {
+    (p.visits || []).forEach(v => {
+      if (v.agentId !== agentId) return;
+      if (!v.date) return;
+      const mk = v.date.slice(0, 7);
+      if (!months[mk]) months[mk] = { doors: 0, evals: 0 };
+      months[mk].doors++;
+      if (v.evalBooked === "yes") months[mk].evals++;
+    });
+  });
+  return Object.entries(months).sort((a, b) => b[0].localeCompare(a[0]));
 }
 
 onAuthStateChanged(auth, async (user) => {
@@ -154,10 +219,14 @@ window.switchView = function (name, el) {
   document.getElementById(`view-${name}`).classList.add("active");
   if (el) document.querySelectorAll(`[data-view="${name}"]`).forEach(n => n.classList.add("active"));
   document.getElementById("mobileTitle").textContent =
-    name === "prospects" ? "Prospects" : name === "dashboard" ? "Dashboard" : name === "targets" ? "Today's Targets" : "Admin";
+    name === "prospects" ? "Prospects" :
+    name === "dashboard" ? "Dashboard" :
+    name === "targets" ? "Today's Targets" :
+    name === "performance" ? "My Performance" : "Admin";
   if (name === "dashboard") renderDashboard();
   if (name === "admin") renderAdmin();
   if (name === "targets") renderTargetsView();
+  if (name === "performance") renderPerformanceView();
 };
 
 window.toggleMobileNav = function () {
@@ -175,6 +244,8 @@ function subscribeToProspects() {
     renderProspects();
     updateProspectCount();
     if (isAdmin) renderDashboard();
+    const perfView = document.getElementById("view-performance");
+    if (perfView && perfView.classList.contains("active")) renderPerformanceView();
   });
 }
 
@@ -185,11 +256,8 @@ function subscribeToTargets() {
   unsubscribeTargets = onSnapshot(targetDoc, (snap) => {
     if (snap.exists()) {
       const data = snap.data();
-      if (data.date === todayKey) {
-        todaysTargets = data.prospectIds || [];
-      } else {
-        todaysTargets = [];
-      }
+      if (data.date === todayKey) todaysTargets = data.prospectIds || [];
+      else todaysTargets = [];
     } else {
       todaysTargets = [];
     }
@@ -203,9 +271,6 @@ function subscribeToTargets() {
 function updateTargetNav() {
   const n = todaysTargets.length;
   const badge = n > 0 ? ` (${n})` : "";
-  document.querySelectorAll('[data-view="targets"]').forEach(el => {
-    el.querySelector(".nav-label") && (el.querySelector(".nav-label").textContent = `Today's Targets${badge}`);
-  });
   const navEl = document.getElementById("targetsNavLabel");
   if (navEl) navEl.textContent = `Today's Targets${badge}`;
   const mobileEl = document.getElementById("targetsNavLabelMobile");
@@ -215,12 +280,9 @@ function updateTargetNav() {
 window.toggleTarget = async function(prospectId) {
   const todayKey = getTodayKey();
   const targetDocRef = doc(db, "targets", `${currentUser.uid}_${todayKey}`);
-  let newTargets;
-  if (todaysTargets.includes(prospectId)) {
-    newTargets = todaysTargets.filter(id => id !== prospectId);
-  } else {
-    newTargets = [...todaysTargets, prospectId];
-  }
+  const newTargets = todaysTargets.includes(prospectId)
+    ? todaysTargets.filter(id => id !== prospectId)
+    : [...todaysTargets, prospectId];
   await setDoc(targetDocRef, { prospectIds: newTargets, date: todayKey, agentId: currentUser.uid });
 };
 
@@ -243,68 +305,221 @@ function renderTargetsView() {
   if (!el) return;
   const targets = allProspects.filter(p => todaysTargets.includes(p.id));
   if (targets.length === 0) {
-    el.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">🎯</div>
-        <div class="empty-title">No targets for today</div>
-        <div class="empty-sub">Go to Prospects and click the 🎯 button on any card to add it to today's targets.</div>
-      </div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">🎯</div>
+      <div class="empty-title">No targets for today</div>
+      <div class="empty-sub">Go to Prospects and click the 🎯 button on any card to add it to today's targets.</div>
+    </div>`;
     return;
   }
-
-  // Build Google Maps URL with all addresses as waypoints
   const addresses = targets.map(p => {
     const o = p.owners?.[0];
-    return o ? `${o.street}, ${o.city}` : p.listingAddress || "";
+    if (o && o.street) return `${o.street}, ${o.city}`;
+    return "";
   }).filter(Boolean);
   const mapsUrl = addresses.length > 1
     ? `https://www.google.com/maps/dir/${addresses.map(a => encodeURIComponent(a)).join("/")}`
-    : addresses.length === 1
-    ? `https://www.google.com/maps/search/${encodeURIComponent(addresses[0])}`
-    : "";
+    : addresses.length === 1 ? `https://www.google.com/maps/search/${encodeURIComponent(addresses[0])}` : "";
 
   const stopsList = targets.map((p, i) => {
     const o = p.owners?.[0];
-    const addr = o ? `${o.street}, ${o.city} ${o.postal}` : p.listingAddress || "—";
+    const addr = o ? `${o.street}, ${o.city} ${o.postal}` : "—";
     const propType = detectPropertyType(p.listingAddress);
-    const municipality = extractMunicipality(p.listingAddress);
     const mailings = (p.mail || []).filter(Boolean).length;
-    const visits = (p.visits || []).length;
     const evalBooked = (p.visits || []).some(v => v.evalBooked === "yes");
     const contacted = (p.visits || []).some(v => v.contact === "yes");
     const statusColor = evalBooked ? "#2D6A4F" : contacted ? "#1D4ED8" : mailings > 0 ? "#92400E" : "#6B7280";
     const statusLabel = evalBooked ? "Eval booked" : contacted ? "Contacted" : mailings > 0 ? `${mailings} mailings` : "Not contacted";
-    return `
-      <div style="display:flex;gap:14px;align-items:flex-start;padding:14px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);margin-bottom:10px;">
-        <div style="width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;flex-shrink:0;">${i+1}</div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:14px;font-weight:600;margin-bottom:2px;">${(p.owners||[]).map(o=>o.name).join(", ")}</div>
-          <div style="font-size:13px;color:var(--text-2);margin-bottom:6px;">📍 ${addr}</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-            <span style="font-size:11px;padding:2px 8px;border-radius:99px;background:${propType==='condo'?'#EEEDFE':'#EAF3DE'};color:${propType==='condo'?'#3C3489':'#2D6A4F'};">${propType==='condo'?'🏢':'🏠'} ${propType}</span>
-            <span style="font-size:11px;padding:2px 8px;border-radius:99px;background:var(--surface);border:1px solid var(--border);color:${statusColor};">${statusLabel}</span>
-            <span style="font-size:11px;color:var(--text-3);">MLS #${p.mls}</span>
-          </div>
+    const mapsAddr = o && o.street ? `${o.street}, ${o.city}` : "";
+    return `<div style="display:flex;gap:14px;align-items:flex-start;padding:14px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);margin-bottom:10px;">
+      <div style="width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;flex-shrink:0;">${i+1}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:14px;font-weight:600;margin-bottom:2px;">${(p.owners||[]).map(o=>o.name).join(", ")}</div>
+        <div style="font-size:13px;color:var(--text-2);margin-bottom:6px;">📍 ${addr}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+          <span style="font-size:11px;padding:2px 8px;border-radius:99px;background:${propType==='condo'?'#EEEDFE':'#EAF3DE'};color:${propType==='condo'?'#3C3489':'#2D6A4F'};">${propType==='condo'?'🏢':'🏠'} ${propType}</span>
+          <span style="font-size:11px;padding:2px 8px;border-radius:99px;background:var(--surface);border:1px solid var(--border);color:${statusColor};">${statusLabel}</span>
+          <span style="font-size:11px;color:var(--text-3);">MLS #${p.mls}</span>
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
-          <a href="https://www.google.com/maps/search/${encodeURIComponent(addr)}" target="_blank" style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--accent-light);color:var(--accent);border:none;cursor:pointer;text-decoration:none;white-space:nowrap;">📍 Maps</a>
-          <button onclick="removeTarget('${p.id}')" style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--red-bg);color:var(--red);border:none;cursor:pointer;font-family:var(--font);white-space:nowrap;">✕ Remove</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
+        ${mapsAddr ? `<a href="https://www.google.com/maps/search/${encodeURIComponent(mapsAddr)}" target="_blank" style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--accent-light);color:var(--accent);text-decoration:none;white-space:nowrap;">📍 Maps</a>` : ""}
+        <button onclick="removeTarget('${p.id}')" style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--red-bg);color:var(--red);border:none;cursor:pointer;font-family:var(--font);white-space:nowrap;">✕ Remove</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  el.innerHTML = `
+    <div style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <div style="flex:1;font-size:13px;color:var(--text-2);">${targets.length} stop${targets.length !== 1 ? "s" : ""} · ${new Date().toLocaleDateString("en-CA", {weekday:"long",month:"long",day:"numeric"})}</div>
+      ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border-radius:var(--radius);background:var(--accent);color:#fff;font-size:13px;font-weight:500;text-decoration:none;font-family:var(--font);">🗺 Open full route in Google Maps</a>` : ""}
+      <button onclick="clearAllTargets()" style="padding:9px 14px;border-radius:var(--radius);background:var(--red-bg);color:var(--red);border:none;font-size:13px;font-family:var(--font);cursor:pointer;">Clear all</button>
+    </div>
+    <div style="background:var(--accent-light);border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;font-size:12px;color:var(--accent);line-height:1.6;">
+      🎯 Stops are listed in the order you added them. Google Maps will optimize the route automatically.
+    </div>
+    ${stopsList}`;
+}
+
+// ── Performance view ───────────────────────────────────────
+function renderPerformanceView() {
+  const el = document.getElementById("performanceContent");
+  if (!el) return;
+
+  if (isAdmin) {
+    renderAdminPerformance(el);
+  } else {
+    renderAgentPerformance(el, currentUser.uid, currentUserProfile?.name || currentUser.email);
+  }
+}
+
+function renderTierMeter(doors, structure) {
+  const tiers = structure.tiers;
+  const maxDoors = tiers[tiers.length - 1].doors;
+  const displayMax = Math.max(doors, maxDoors);
+  const pct = Math.min((doors / maxDoors) * 100, 100);
+
+  const tier1 = tiers[0];
+  const tier2 = tiers[1];
+  const tier1Pct = (tier1.doors / maxDoors) * 100;
+  const tier2Pct = 100;
+
+  const currentTier = doors >= tier2.doors ? 2 : doors >= tier1.doors ? 1 : 0;
+  const tierColors = ["#6B7280", "#F59E0B", "#10B981"];
+  const tierLabels = ["No tier yet", `${tier1.label} unlocked 🎉`, `${tier2.label} unlocked 🏆`];
+
+  const nextTier = currentTier < 2 ? tiers[currentTier] : null;
+  const doorsLeft = nextTier ? nextTier.doors - doors : 0;
+
+  return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <div>
+          <div style="font-size:22px;font-weight:700;color:var(--text);">${doors} doors</div>
+          <div style="font-size:13px;color:${tierColors[currentTier]};font-weight:500;margin-top:2px;">${tierLabels[currentTier]}</div>
+        </div>
+        ${nextTier ? `<div style="text-align:right;"><div style="font-size:12px;color:var(--text-3);">Next tier in</div><div style="font-size:20px;font-weight:700;color:var(--accent);">${doorsLeft} doors</div></div>` : `<div style="font-size:28px;">🏆</div>`}
+      </div>
+
+      <!-- Progress bar -->
+      <div style="position:relative;height:20px;background:var(--bg);border-radius:99px;overflow:visible;margin-bottom:24px;">
+        <!-- Fill -->
+        <div style="position:absolute;left:0;top:0;height:100%;width:${pct}%;background:${currentTier === 2 ? '#10B981' : currentTier === 1 ? '#F59E0B' : 'var(--accent)'};border-radius:99px;transition:width 0.6s ease;"></div>
+        <!-- Tier 1 checkpoint -->
+        <div style="position:absolute;left:${tier1Pct}%;top:50%;transform:translate(-50%,-50%);z-index:2;">
+          <div style="width:20px;height:20px;border-radius:50%;background:${doors >= tier1.doors ? '#F59E0B' : '#fff'};border:2px solid ${doors >= tier1.doors ? '#F59E0B' : '#D1D5DB'};display:flex;align-items:center;justify-content:center;font-size:10px;">${doors >= tier1.doors ? '✓' : ''}</div>
+        </div>
+        <!-- Tier 2 checkpoint -->
+        <div style="position:absolute;left:calc(100% - 10px);top:50%;transform:translate(-50%,-50%);z-index:2;">
+          <div style="width:20px;height:20px;border-radius:50%;background:${doors >= tier2.doors ? '#10B981' : '#fff'};border:2px solid ${doors >= tier2.doors ? '#10B981' : '#D1D5DB'};display:flex;align-items:center;justify-content:center;font-size:10px;">${doors >= tier2.doors ? '✓' : ''}</div>
+        </div>
+      </div>
+
+      <!-- Tier labels below bar -->
+      <div style="display:flex;justify-content:space-between;margin-bottom:20px;">
+        <div style="font-size:11px;color:var(--text-3);">0</div>
+        <div style="font-size:11px;color:${doors >= tier1.doors ? '#F59E0B' : 'var(--text-3)'};font-weight:500;text-align:center;">
+          ${tier1.label}<br>${tier1.doors} doors
+        </div>
+        <div style="font-size:11px;color:${doors >= tier2.doors ? '#10B981' : 'var(--text-3)'};font-weight:500;text-align:right;">
+          ${tier2.label}<br>${tier2.doors} doors
+        </div>
+      </div>
+
+      <!-- Commission cards -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div style="padding:12px;border-radius:var(--radius);border:2px solid ${currentTier >= 1 ? '#F59E0B' : 'var(--border)'};background:${currentTier >= 1 ? '#FFFBEB' : 'var(--bg)'};opacity:${currentTier >= 1 ? '1' : '0.5'};">
+          <div style="font-size:11px;font-weight:600;color:${currentTier >= 1 ? '#92400E' : 'var(--text-3)'};margin-bottom:6px;">🥈 ${tier1.label} · ${tier1.doors} doors</div>
+          <div style="font-size:13px;color:var(--text-2);">Sale: <strong style="color:${currentTier >= 1 ? '#92400E' : 'var(--text-3)'};">${tier1.sale}%</strong></div>
+          <div style="font-size:13px;color:var(--text-2);">Purchase: <strong style="color:${currentTier >= 1 ? '#92400E' : 'var(--text-3)'};">${tier1.purchase}%</strong></div>
+        </div>
+        <div style="padding:12px;border-radius:var(--radius);border:2px solid ${currentTier >= 2 ? '#10B981' : 'var(--border)'};background:${currentTier >= 2 ? '#ECFDF5' : 'var(--bg)'};opacity:${currentTier >= 2 ? '1' : '0.5'};">
+          <div style="font-size:11px;font-weight:600;color:${currentTier >= 2 ? '#065F46' : 'var(--text-3)'};margin-bottom:6px;">🥇 ${tier2.label} · ${tier2.doors} doors</div>
+          <div style="font-size:13px;color:var(--text-2);">Sale: <strong style="color:${currentTier >= 2 ? '#065F46' : 'var(--text-3)'};">${tier2.sale}%</strong></div>
+          <div style="font-size:13px;color:var(--text-2);">Purchase: <strong style="color:${currentTier >= 2 ? '#065F46' : 'var(--text-3)'};">${tier2.purchase}%</strong></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderAgentPerformance(el, agentId, agentName) {
+  const structure = getBonusStructure(agentName);
+  const currentMonthKey = getMonthKey();
+  const { doors, evals } = getVisitsForAgent(agentId, currentMonthKey);
+  const history = getMonthlyHistory(agentId);
+
+  const monthName = new Date().toLocaleDateString("en-CA", { month: "long", year: "numeric" });
+
+  const historyHtml = history.length === 0 ? "" : `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;">
+      <div class="section-title" style="margin-bottom:12px;">Monthly history</div>
+      ${history.map(([mk, stats]) => {
+        const struct = getBonusStructure(agentName);
+        const tier = stats.doors >= struct.tiers[1].doors ? 2 : stats.doors >= struct.tiers[0].doors ? 1 : 0;
+        const tierBadge = tier === 2 ? `<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#ECFDF5;color:#065F46;font-weight:500;">Tier 2 🏆</span>`
+          : tier === 1 ? `<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#FFFBEB;color:#92400E;font-weight:500;">Tier 1 🥈</span>`
+          : `<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg);color:var(--text-3);">No tier</span>`;
+        const d = new Date(mk + "-01");
+        const label = d.toLocaleDateString("en-CA", { month: "long", year: "numeric" });
+        return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
+          <div style="flex:1;font-size:13px;font-weight:500;">${label}</div>
+          <div style="font-size:12px;color:var(--text-2);">${stats.doors} doors · ${stats.evals} evals</div>
+          ${tierBadge}
+        </div>`;
+      }).join("")}
+    </div>`;
+
+  el.innerHTML = `
+    <div style="margin-bottom:16px;">
+      <div style="font-size:13px;color:var(--text-2);">${monthName} · ${evals} evaluation${evals !== 1 ? "s" : ""} booked</div>
+    </div>
+    ${renderTierMeter(doors, structure)}
+    ${historyHtml}`;
+}
+
+function renderAdminPerformance(el) {
+  if (allUsers.length === 0) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">◎</div><div class="empty-title">No agents yet</div></div>`;
+    return;
+  }
+  const currentMonthKey = getMonthKey();
+  const monthName = new Date().toLocaleDateString("en-CA", { month: "long", year: "numeric" });
+
+  const agentsHtml = allUsers.map(u => {
+    const { doors, evals } = getVisitsForAgent(u.uid, currentMonthKey);
+    const structure = getBonusStructure(u.name);
+    const tier = doors >= structure.tiers[1].doors ? 2 : doors >= structure.tiers[0].doors ? 1 : 0;
+    const tierBadge = tier === 2 ? `<span style="font-size:11px;padding:2px 8px;border-radius:4px;background:#ECFDF5;color:#065F46;font-weight:500;">Tier 2 🏆</span>`
+      : tier === 1 ? `<span style="font-size:11px;padding:2px 8px;border-radius:4px;background:#FFFBEB;color:#92400E;font-weight:500;">Tier 1 🥈</span>`
+      : `<span style="font-size:11px;padding:2px 8px;border-radius:4px;background:var(--bg);color:var(--text-3);">No tier</span>`;
+    const maxDoors = structure.tiers[1].doors;
+    const pct = Math.min((doors / maxDoors) * 100, 100);
+    const tier1Pct = (structure.tiers[0].doors / maxDoors) * 100;
+    return `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <div class="agent-avatar">${(u.name||"?").slice(0,2).toUpperCase()}</div>
+          <div style="flex:1;">
+            <div style="font-size:14px;font-weight:600;">${u.name || u.email}</div>
+            <div style="font-size:12px;color:var(--text-3);">${doors} doors · ${evals} evals this month</div>
+          </div>
+          ${tierBadge}
+        </div>
+        <div style="position:relative;height:14px;background:var(--bg);border-radius:99px;overflow:visible;margin-bottom:8px;">
+          <div style="position:absolute;left:0;top:0;height:100%;width:${pct}%;background:${tier === 2 ? '#10B981' : tier === 1 ? '#F59E0B' : 'var(--accent)'};border-radius:99px;transition:width 0.6s;"></div>
+          <div style="position:absolute;left:${tier1Pct}%;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:${doors >= structure.tiers[0].doors ? '#F59E0B' : '#fff'};border:2px solid ${doors >= structure.tiers[0].doors ? '#F59E0B' : '#D1D5DB'};"></div>
+          <div style="position:absolute;left:calc(100% - 7px);top:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:${doors >= structure.tiers[1].doors ? '#10B981' : '#fff'};border:2px solid ${doors >= structure.tiers[1].doors ? '#10B981' : '#D1D5DB'};"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);">
+          <span>0</span>
+          <span>${structure.tiers[0].doors} (T1)</span>
+          <span>${structure.tiers[1].doors} (T2)</span>
         </div>
       </div>`;
   }).join("");
 
   el.innerHTML = `
-    <div style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-      <div style="flex:1;">
-        <div style="font-size:13px;color:var(--text-2);">${targets.length} stop${targets.length !== 1 ? "s" : ""} · ${new Date().toLocaleDateString("en-CA", {weekday:"long",month:"long",day:"numeric"})}</div>
-      </div>
-      ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border-radius:var(--radius);background:var(--accent);color:#fff;font-size:13px;font-weight:500;text-decoration:none;font-family:var(--font);">🗺 Open full route in Google Maps</a>` : ""}
-      <button onclick="clearAllTargets()" style="padding:9px 14px;border-radius:var(--radius);background:var(--red-bg);color:var(--red);border:none;font-size:13px;font-family:var(--font);cursor:pointer;">Clear all</button>
-    </div>
-    <div style="background:var(--accent-light);border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;font-size:12px;color:var(--accent);line-height:1.6;">
-      🎯 Stops are listed in the order you added them. Google Maps will optimize the route automatically when you open the full route link.
-    </div>
-    ${stopsList}`;
+    <div style="font-size:13px;color:var(--text-2);margin-bottom:16px;">${monthName} — all agents</div>
+    ${agentsHtml}`;
 }
 
 function updateProspectCount() {
@@ -710,7 +925,7 @@ function renderProspectModal(p) {
     <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
       ${propType === "condo" ? '<span class="badge" style="background:#EEEDFE;color:#3C3489;">🏢 Condo</span>' : '<span class="badge" style="background:#EAF3DE;color:#2D6A4F;">🏠 House</span>'}
       <span class="badge badge-gray">📍 ${municipality}</span>
-      <button onclick="toggleTarget('${p.id}')" style="margin-left:auto;padding:6px 12px;border-radius:99px;border:none;background:${isTargeted ? 'var(--accent)' : 'var(--surface)'};border:1px solid ${isTargeted ? 'var(--accent)' : 'var(--border-med)'};color:${isTargeted ? '#fff' : 'var(--text-2)'};font-size:12px;font-family:var(--font);cursor:pointer;">🎯 ${isTargeted ? 'In Today\'s Targets' : 'Add to Today\'s Targets'}</button>
+      <button onclick="toggleTarget('${p.id}')" style="margin-left:auto;padding:6px 12px;border-radius:99px;border:1px solid ${isTargeted ? 'var(--accent)' : 'var(--border-med)'};background:${isTargeted ? 'var(--accent)' : 'var(--surface)'};color:${isTargeted ? '#fff' : 'var(--text-2)'};font-size:12px;font-family:var(--font);cursor:pointer;">🎯 ${isTargeted ? "In Today's Targets" : "Add to Today's Targets"}</button>
     </div>
     <div class="detail-grid">
       <div class="detail-field"><div class="lbl">Last price</div><div class="val">${fmt(p.lastPrice)}</div></div>
