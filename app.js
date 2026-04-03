@@ -3,7 +3,7 @@ import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
-  collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc,
+  collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, setDoc,
   onSnapshot, query, orderBy, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
@@ -15,6 +15,8 @@ let allUsers = [];
 let exportMode = false;
 let selectedMLS = new Set();
 let unsubscribeProspects = null;
+let unsubscribeTargets = null;
+let todaysTargets = [];
 let activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all", type: "all" };
 let selectedMunicipalities = new Set();
 let dupReviewMode = false;
@@ -62,7 +64,6 @@ function getDupGroups() {
       groups[p.mls].push(p);
     }
   });
-  // Sort each group: oldest first (master), newest last (to be merged/deleted)
   Object.values(groups).forEach(group => {
     group.sort((a, b) => {
       const ta = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
@@ -73,6 +74,10 @@ function getDupGroups() {
   return groups;
 }
 
+function getTodayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     currentUser = user;
@@ -80,6 +85,7 @@ onAuthStateChanged(auth, async (user) => {
     showApp();
   } else {
     currentUser = null; currentUserProfile = null; isAdmin = false;
+    todaysTargets = [];
     showLogin();
   }
 });
@@ -108,6 +114,7 @@ window.handleLogin = async function () {
 
 window.handleLogout = async function () {
   if (unsubscribeProspects) unsubscribeProspects();
+  if (unsubscribeTargets) unsubscribeTargets();
   await signOut(auth);
 };
 
@@ -123,6 +130,7 @@ function showApp() {
   document.getElementById("appScreen").classList.add("active");
   setupRoleUI();
   subscribeToProspects();
+  subscribeToTargets();
   if (isAdmin) { loadAllUsers(); renderDashboard(); }
 }
 
@@ -146,9 +154,10 @@ window.switchView = function (name, el) {
   document.getElementById(`view-${name}`).classList.add("active");
   if (el) document.querySelectorAll(`[data-view="${name}"]`).forEach(n => n.classList.add("active"));
   document.getElementById("mobileTitle").textContent =
-    name === "prospects" ? "Prospects" : name === "dashboard" ? "Dashboard" : "Admin";
+    name === "prospects" ? "Prospects" : name === "dashboard" ? "Dashboard" : name === "targets" ? "Today's Targets" : "Admin";
   if (name === "dashboard") renderDashboard();
   if (name === "admin") renderAdmin();
+  if (name === "targets") renderTargetsView();
 };
 
 window.toggleMobileNav = function () {
@@ -167,6 +176,135 @@ function subscribeToProspects() {
     updateProspectCount();
     if (isAdmin) renderDashboard();
   });
+}
+
+// ── Today's Targets ────────────────────────────────────────
+function subscribeToTargets() {
+  const todayKey = getTodayKey();
+  const targetDoc = doc(db, "targets", `${currentUser.uid}_${todayKey}`);
+  unsubscribeTargets = onSnapshot(targetDoc, (snap) => {
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data.date === todayKey) {
+        todaysTargets = data.prospectIds || [];
+      } else {
+        todaysTargets = [];
+      }
+    } else {
+      todaysTargets = [];
+    }
+    updateTargetNav();
+    renderProspects();
+    const view = document.getElementById("view-targets");
+    if (view && view.classList.contains("active")) renderTargetsView();
+  });
+}
+
+function updateTargetNav() {
+  const n = todaysTargets.length;
+  const badge = n > 0 ? ` (${n})` : "";
+  document.querySelectorAll('[data-view="targets"]').forEach(el => {
+    el.querySelector(".nav-label") && (el.querySelector(".nav-label").textContent = `Today's Targets${badge}`);
+  });
+  const navEl = document.getElementById("targetsNavLabel");
+  if (navEl) navEl.textContent = `Today's Targets${badge}`;
+  const mobileEl = document.getElementById("targetsNavLabelMobile");
+  if (mobileEl) mobileEl.textContent = `Today's Targets${badge}`;
+}
+
+window.toggleTarget = async function(prospectId) {
+  const todayKey = getTodayKey();
+  const targetDocRef = doc(db, "targets", `${currentUser.uid}_${todayKey}`);
+  let newTargets;
+  if (todaysTargets.includes(prospectId)) {
+    newTargets = todaysTargets.filter(id => id !== prospectId);
+  } else {
+    newTargets = [...todaysTargets, prospectId];
+  }
+  await setDoc(targetDocRef, { prospectIds: newTargets, date: todayKey, agentId: currentUser.uid });
+};
+
+window.removeTarget = async function(prospectId) {
+  const todayKey = getTodayKey();
+  const targetDocRef = doc(db, "targets", `${currentUser.uid}_${todayKey}`);
+  const newTargets = todaysTargets.filter(id => id !== prospectId);
+  await setDoc(targetDocRef, { prospectIds: newTargets, date: todayKey, agentId: currentUser.uid });
+};
+
+window.clearAllTargets = async function() {
+  if (!confirm("Clear all targets for today?")) return;
+  const todayKey = getTodayKey();
+  const targetDocRef = doc(db, "targets", `${currentUser.uid}_${todayKey}`);
+  await setDoc(targetDocRef, { prospectIds: [], date: todayKey, agentId: currentUser.uid });
+};
+
+function renderTargetsView() {
+  const el = document.getElementById("targetsContent");
+  if (!el) return;
+  const targets = allProspects.filter(p => todaysTargets.includes(p.id));
+  if (targets.length === 0) {
+    el.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">🎯</div>
+        <div class="empty-title">No targets for today</div>
+        <div class="empty-sub">Go to Prospects and click the 🎯 button on any card to add it to today's targets.</div>
+      </div>`;
+    return;
+  }
+
+  // Build Google Maps URL with all addresses as waypoints
+  const addresses = targets.map(p => {
+    const o = p.owners?.[0];
+    return o ? `${o.street}, ${o.city}` : p.listingAddress || "";
+  }).filter(Boolean);
+  const mapsUrl = addresses.length > 1
+    ? `https://www.google.com/maps/dir/${addresses.map(a => encodeURIComponent(a)).join("/")}`
+    : addresses.length === 1
+    ? `https://www.google.com/maps/search/${encodeURIComponent(addresses[0])}`
+    : "";
+
+  const stopsList = targets.map((p, i) => {
+    const o = p.owners?.[0];
+    const addr = o ? `${o.street}, ${o.city} ${o.postal}` : p.listingAddress || "—";
+    const propType = detectPropertyType(p.listingAddress);
+    const municipality = extractMunicipality(p.listingAddress);
+    const mailings = (p.mail || []).filter(Boolean).length;
+    const visits = (p.visits || []).length;
+    const evalBooked = (p.visits || []).some(v => v.evalBooked === "yes");
+    const contacted = (p.visits || []).some(v => v.contact === "yes");
+    const statusColor = evalBooked ? "#2D6A4F" : contacted ? "#1D4ED8" : mailings > 0 ? "#92400E" : "#6B7280";
+    const statusLabel = evalBooked ? "Eval booked" : contacted ? "Contacted" : mailings > 0 ? `${mailings} mailings` : "Not contacted";
+    return `
+      <div style="display:flex;gap:14px;align-items:flex-start;padding:14px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);margin-bottom:10px;">
+        <div style="width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;flex-shrink:0;">${i+1}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:14px;font-weight:600;margin-bottom:2px;">${(p.owners||[]).map(o=>o.name).join(", ")}</div>
+          <div style="font-size:13px;color:var(--text-2);margin-bottom:6px;">📍 ${addr}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+            <span style="font-size:11px;padding:2px 8px;border-radius:99px;background:${propType==='condo'?'#EEEDFE':'#EAF3DE'};color:${propType==='condo'?'#3C3489':'#2D6A4F'};">${propType==='condo'?'🏢':'🏠'} ${propType}</span>
+            <span style="font-size:11px;padding:2px 8px;border-radius:99px;background:var(--surface);border:1px solid var(--border);color:${statusColor};">${statusLabel}</span>
+            <span style="font-size:11px;color:var(--text-3);">MLS #${p.mls}</span>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
+          <a href="https://www.google.com/maps/search/${encodeURIComponent(addr)}" target="_blank" style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--accent-light);color:var(--accent);border:none;cursor:pointer;text-decoration:none;white-space:nowrap;">📍 Maps</a>
+          <button onclick="removeTarget('${p.id}')" style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--red-bg);color:var(--red);border:none;cursor:pointer;font-family:var(--font);white-space:nowrap;">✕ Remove</button>
+        </div>
+      </div>`;
+  }).join("");
+
+  el.innerHTML = `
+    <div style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <div style="flex:1;">
+        <div style="font-size:13px;color:var(--text-2);">${targets.length} stop${targets.length !== 1 ? "s" : ""} · ${new Date().toLocaleDateString("en-CA", {weekday:"long",month:"long",day:"numeric"})}</div>
+      </div>
+      ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border-radius:var(--radius);background:var(--accent);color:#fff;font-size:13px;font-weight:500;text-decoration:none;font-family:var(--font);">🗺 Open full route in Google Maps</a>` : ""}
+      <button onclick="clearAllTargets()" style="padding:9px 14px;border-radius:var(--radius);background:var(--red-bg);color:var(--red);border:none;font-size:13px;font-family:var(--font);cursor:pointer;">Clear all</button>
+    </div>
+    <div style="background:var(--accent-light);border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;font-size:12px;color:var(--accent);line-height:1.6;">
+      🎯 Stops are listed in the order you added them. Google Maps will optimize the route automatically when you open the full route link.
+    </div>
+    ${stopsList}`;
 }
 
 function updateProspectCount() {
@@ -364,6 +502,7 @@ function prospectCard(p, isDup) {
   const contacted = (p.visits || []).some(v => v.contact === "yes");
   const propType = detectPropertyType(p.listingAddress);
   const municipality = extractMunicipality(p.listingAddress);
+  const isTargeted = todaysTargets.includes(p.id);
   const statusBadge = evalBooked ? `<span class="badge badge-green">Eval booked</span>`
     : contacted ? `<span class="badge badge-blue">Contacted</span>`
     : mailings > 0 ? `<span class="badge badge-amber">${mailings} mailing${mailings > 1 ? "s" : ""} sent</span>`
@@ -372,13 +511,15 @@ function prospectCard(p, isDup) {
     ? `<span class="badge" style="background:#EEEDFE;color:#3C3489;">🏢 Condo</span>`
     : `<span class="badge" style="background:#EAF3DE;color:#2D6A4F;">🏠 House</span>`;
   const dupBadge = isDup ? `<span class="badge" style="background:var(--amber-bg);color:var(--amber);">⚠ Potential duplicate</span>` : "";
-  const cardBg = isDup && dupReviewMode ? 'border-color:#E9A000;background:#FDF3E7;' : '';
+  const cardBg = isDup && dupReviewMode ? 'border-color:#E9A000;background:#FDF3E7;' : isTargeted ? 'border-color:var(--accent);' : '';
+  const targetBtn = `<button onclick="event.stopPropagation();toggleTarget('${p.id}')" title="${isTargeted ? 'Remove from Today\'s Targets' : 'Add to Today\'s Targets'}" style="position:absolute;top:10px;right:10px;width:28px;height:28px;border-radius:50%;border:none;background:${isTargeted ? 'var(--accent)' : 'var(--border)'};color:${isTargeted ? '#fff' : 'var(--text-3)'};font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;">🎯</button>`;
   const clickFn = dupReviewMode ? '' : exportMode ? `toggleSelectProspect('${p.mls}')` : `openProspectModal('${p.id}')`;
   return `<div class="prospect-card" onclick="${clickFn}" style="position:relative;${cardBg}">
+    ${targetBtn}
     <div class="card-top">
       <div class="card-avatar">${initials}</div>
       <div class="card-main">
-        <div class="card-name">${(p.owners || []).map(o => o.name).join(", ")}</div>
+        <div class="card-name" style="padding-right:32px;">${(p.owners || []).map(o => o.name).join(", ")}</div>
         <div class="card-addr">${p.owners?.[0]?.street || ""}, ${p.owners?.[0]?.city || ""}</div>
         <div class="card-mls">MLS #${p.mls} · Expires ${p.expiry || "—"} · 📍 ${municipality}</div>
       </div>
@@ -392,7 +533,6 @@ function prospectCard(p, isDup) {
   </div>`;
 }
 
-// ── Duplicate review & merge ───────────────────────────────
 window.startDupReview = function() {
   const groups = getDupGroups();
   if (Object.keys(groups).length === 0) { showToast("No duplicates found in your database"); return; }
@@ -436,7 +576,7 @@ function showDupReviewModal(groups) {
     }).join("");
     return `
       <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px;background:var(--surface);">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-bottom:6px;">MLS #${mls} · ${groupKeys.length > 1 ? groupKeys.indexOf(mls)+1 + ' of ' + groupKeys.length : '1 group'}</div>
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-bottom:6px;">MLS #${mls}</div>
         <div style="background:var(--accent-light);border:1px solid var(--accent);border-radius:8px;padding:10px 12px;margin-bottom:4px;">
           <div style="font-size:12px;font-weight:500;color:var(--accent);margin-bottom:4px;">✓ Master — will be kept</div>
           <div style="font-size:13px;font-weight:500;">${masterName}</div>
@@ -463,7 +603,7 @@ function showDupReviewModal(groups) {
       <button class="btn-secondary" onclick="closeDupModal()">Done</button>
     </div>`;
   openModal("prospectModal");
-};
+}
 
 window.closeDupModal = function() {
   dupReviewMode = false;
@@ -476,9 +616,7 @@ window.closeDupModal = function() {
 
 function mergeMail(mail1, mail2) {
   const result = ["", "", "", ""];
-  for (let i = 0; i < 4; i++) {
-    result[i] = mail1[i] || mail2[i] || "";
-  }
+  for (let i = 0; i < 4; i++) result[i] = mail1[i] || mail2[i] || "";
   return result;
 }
 
@@ -492,12 +630,8 @@ window.mergeProspects = async function(masterId, dupId) {
   await deleteDoc(doc(db, "prospects", dupId));
   showToast("Merged successfully");
   const groups = getDupGroups();
-  if (Object.keys(groups).length === 0) {
-    closeDupModal();
-    showToast("All duplicates resolved!");
-  } else {
-    showDupReviewModal(groups);
-  }
+  if (Object.keys(groups).length === 0) { closeDupModal(); showToast("All duplicates resolved!"); }
+  else showDupReviewModal(groups);
 };
 
 window.deleteSingleDup = async function(dupId) {
@@ -505,11 +639,8 @@ window.deleteSingleDup = async function(dupId) {
   await deleteDoc(doc(db, "prospects", dupId));
   showToast("Deleted");
   const groups = getDupGroups();
-  if (Object.keys(groups).length === 0) {
-    closeDupModal();
-  } else {
-    showDupReviewModal(groups);
-  }
+  if (Object.keys(groups).length === 0) closeDupModal();
+  else showDupReviewModal(groups);
 };
 
 window.mergeAllDuplicates = async function() {
@@ -527,10 +658,7 @@ window.mergeAllDuplicates = async function() {
       mergedVisits = [...mergedVisits, ...(dup.visits || [])];
     }
     await updateDoc(doc(db, "prospects", master.id), { mail: mergedMail, visits: mergedVisits });
-    for (const dup of dupes) {
-      await deleteDoc(doc(db, "prospects", dup.id));
-      merged++;
-    }
+    for (const dup of dupes) { await deleteDoc(doc(db, "prospects", dup.id)); merged++; }
   }
   closeDupModal();
   showToast(`Merged and removed ${merged} duplicate${merged !== 1 ? "s" : ""}`);
@@ -548,6 +676,7 @@ function renderProspectModal(p) {
   const fmt = n => n ? "$" + Number(n).toLocaleString("fr-CA") : "—";
   const propType = detectPropertyType(p.listingAddress);
   const municipality = extractMunicipality(p.listingAddress);
+  const isTargeted = todaysTargets.includes(p.id);
   const ownersHtml = (p.owners || []).map(o => `
     <div class="owner-block"><div class="on">${o.name}</div>
     <div class="oa">${o.street}<br>${o.city} &nbsp;${o.postal}</div></div>`).join("");
@@ -578,9 +707,10 @@ function renderProspectModal(p) {
       <div class="modal-sub">MLS #${p.mls} · ${p.listingAddress || ""}</div></div>
       <button class="close-x" onclick="closeAllModals()">×</button>
     </div>
-    <div style="display:flex;gap:8px;margin-bottom:12px;">
+    <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
       ${propType === "condo" ? '<span class="badge" style="background:#EEEDFE;color:#3C3489;">🏢 Condo</span>' : '<span class="badge" style="background:#EAF3DE;color:#2D6A4F;">🏠 House</span>'}
       <span class="badge badge-gray">📍 ${municipality}</span>
+      <button onclick="toggleTarget('${p.id}')" style="margin-left:auto;padding:6px 12px;border-radius:99px;border:none;background:${isTargeted ? 'var(--accent)' : 'var(--surface)'};border:1px solid ${isTargeted ? 'var(--accent)' : 'var(--border-med)'};color:${isTargeted ? '#fff' : 'var(--text-2)'};font-size:12px;font-family:var(--font);cursor:pointer;">🎯 ${isTargeted ? 'In Today\'s Targets' : 'Add to Today\'s Targets'}</button>
     </div>
     <div class="detail-grid">
       <div class="detail-field"><div class="lbl">Last price</div><div class="val">${fmt(p.lastPrice)}</div></div>
