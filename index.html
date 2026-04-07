@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-<title>Track — Real Estate CRM</title>
+  <title>Track — Real Estate CRM</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
@@ -12,7 +12,7 @@
   <div id="loginScreen" class="screen active">
     <div class="login-wrap">
       <div class="login-brand">
-<div class="brand-icon"></div>
+        <div class="brand-icon"></div>
         <h1 class="brand-name">Track</h1>
         <p class="brand-sub">Real Estate Prospecting CRM</p>
       </div>
@@ -32,10 +32,11 @@
       <p class="login-footer">Contact your team leader to get access.</p>
     </div>
   </div>
+
   <div id="appScreen" class="screen">
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-brand">
-<div class="brand-icon sm"></div>
+        <div class="brand-icon sm"></div>
         <span>Track</span>
       </div>
       <nav class="sidebar-nav">
@@ -47,6 +48,9 @@
         </a>
         <a href="#" class="nav-item" data-view="performance" onclick="switchView('performance',this)">
           <span class="nav-icon">📈</span> My Performance
+        </a>
+        <a href="#" class="nav-item" data-view="ops" id="opsNav" onclick="switchView('ops',this)" style="display:none;">
+          <span class="nav-icon">◩</span> BACHA Ops
         </a>
         <a href="#" class="nav-item" data-view="dashboard" id="dashNav" onclick="switchView('dashboard',this)" style="display:none;">
           <span class="nav-icon">◉</span> Dashboard
@@ -60,16 +64,19 @@
         <button class="btn-ghost" onclick="handleLogout()">Sign out</button>
       </div>
     </aside>
+
     <header class="mobile-header">
-<div class="brand-icon sm"></div>
+      <div class="brand-icon sm"></div>
       <span class="mobile-title" id="mobileTitle">Prospects</span>
       <button class="hamburger" onclick="toggleMobileNav()" id="hamburger">☰</button>
     </header>
+
     <div class="mobile-drawer" id="mobileDrawer">
       <nav>
         <a href="#" class="nav-item active" data-view="prospects" onclick="switchView('prospects',this);closeMobileNav()">◈ Prospects</a>
         <a href="#" class="nav-item" data-view="targets" onclick="switchView('targets',this);closeMobileNav()">🎯 <span id="targetsNavLabelMobile">Today's Targets</span></a>
         <a href="#" class="nav-item" data-view="performance" onclick="switchView('performance',this);closeMobileNav()">📈 My Performance</a>
+        <a href="#" class="nav-item" data-view="ops" id="opsNavMobile" onclick="switchView('ops',this);closeMobileNav()" style="display:none;">◩ BACHA Ops</a>
         <a href="#" class="nav-item" data-view="dashboard" id="dashNavMobile" onclick="switchView('dashboard',this);closeMobileNav()" style="display:none;">◉ Dashboard</a>
         <a href="#" class="nav-item" data-view="admin" id="adminNavMobile" onclick="switchView('admin',this);closeMobileNav()" style="display:none;">◎ Admin</a>
         <hr style="border-color:rgba(255,255,255,0.1);margin:12px 0;" />
@@ -77,6 +84,7 @@
       </nav>
       <div id="mobileUserPill" style="padding:12px 16px;font-size:12px;opacity:0.5;"></div>
     </div>
+
     <main class="main-content">
       <div id="view-prospects" class="view active">
         <div class="view-header">
@@ -102,6 +110,7 @@
         <div id="filterBar"></div>
         <div id="prospectsContainer"></div>
       </div>
+
       <div id="view-targets" class="view">
         <div class="view-header">
           <div>
@@ -111,6 +120,7 @@
         </div>
         <div id="targetsContent"></div>
       </div>
+
       <div id="view-performance" class="view">
         <div class="view-header">
           <div>
@@ -120,6 +130,18 @@
         </div>
         <div id="performanceContent"></div>
       </div>
+
+      <div id="view-ops" class="view">
+        <div class="view-header">
+          <div>
+            <h2 class="view-title">BACHA Ops</h2>
+            <p class="view-sub" id="opsSubtitle">Dossiers actifs</p>
+          </div>
+          <div class="header-actions" id="opsHeaderActions"></div>
+        </div>
+        <div id="opsContent"></div>
+      </div>
+
       <div id="view-dashboard" class="view">
         <div class="view-header">
           <div>
@@ -129,6 +151,7 @@
         </div>
         <div id="dashboardContent"></div>
       </div>
+
       <div id="view-admin" class="view">
         <div class="view-header">
           <div>
@@ -141,13 +164,16 @@
       </div>
     </main>
   </div>
+
   <div class="modal-overlay" id="modalOverlay" onclick="closeAllModals(event)">
     <div class="modal" id="prospectModal"><div id="prospectModalContent"></div></div>
     <div class="modal modal-sm" id="addProspectModal"><div id="addProspectContent"></div></div>
     <div class="modal modal-sm" id="visitModal"><div id="visitModalContent"></div></div>
     <div class="modal modal-sm" id="exportModal"><div id="exportModalContent"></div></div>
     <div class="modal modal-sm" id="inviteModal"><div id="inviteModalContent"></div></div>
+    <div class="modal modal-sm" id="opsModal"><div id="opsModalContent"></div></div>
   </div>
+
   <script type="module" src="firebase-config.js"></script>
   <script type="module" src="app.js"></script>
 </body>
