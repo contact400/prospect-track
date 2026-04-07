@@ -137,6 +137,9 @@ const OPS_PHASES = [
 const OPS_ALL_TASKS = OPS_PHASES.flatMap(p => p.tasks);
 const OPS_STATUS_LABELS = {active:"Actif",offre:"Offre reçue",ferme:"Vente ferme",vendu:"Vendu"};
 const OPS_STATUS_COLORS = {active:"#1D9E75",offre:"#185FA5",ferme:"#534AB7",vendu:"#888780"};
+const OPS_PURCHASE_STATUS_LABELS = {active:"Actif",offre:"Offre acceptée",cond:"Conditions réalisées",notarie:"Notarié"};
+const OPS_PURCHASE_STATUS_COLORS = {active:"#888780",offre:"#185FA5",cond:"#1D9E75",notarie:"#534AB7"};
+const OPS_PURCHASE_SOLD = ["cond","notarie"];
 
 
 // ── Helpers ────────────────────────────────────────────────
@@ -361,6 +364,7 @@ window.opsSavePurchase = async function(editId) {
     addr, buyer: document.getElementById("om-buyer").value.trim(),
     price: document.getElementById("om-price").value.trim(),
     agent: document.getElementById("om-agent").value,
+    status: "active",
     assignedTo, conditions:[],
     updatedAt: serverTimestamp()
   };
@@ -414,6 +418,12 @@ window.opsChgStatus = async function(lid, val) {
 };
 
 
+window.opsUpdateListingPrice = async function(lid, field, val) {
+  const update = {updatedAt:serverTimestamp()};
+  update[field] = val;
+  await updateDoc(doc(db,"ops_listings",lid),update);
+};
+
 window.opsAccepterOffre = function(lid) {
   const l = opsListings.find(x=>x.id===lid);
   if (!l) return;
@@ -450,6 +460,15 @@ window.opsDeleteListing = async function(lid) {
   await deleteDoc(doc(db,"ops_listings",lid));
   opsActiveLid = opsListings.filter(x=>x.id!==lid)[0]?.id||null;
   opsView="listings"; renderOps();
+};
+
+window.opsSetPurchaseStatus = async function(pid, status) {
+  await updateDoc(doc(db,"ops_purchases",pid),{status,updatedAt:serverTimestamp()});
+  showToast(OPS_PURCHASE_STATUS_LABELS[status]+" ✓");
+};
+
+window.opsUpdatePurchasePrice = async function(pid, val) {
+  await updateDoc(doc(db,"ops_purchases",pid),{price:val,updatedAt:serverTimestamp()});
 };
 
 window.opsDeletePurchase = async function(pid) {
@@ -526,8 +545,10 @@ function opsRenderDash() {
   allC.sort((a,b)=>{if(!a.c.date&&!b.c.date)return 0;if(!a.c.date)return 1;if(!b.c.date)return -1;return new Date(a.c.date)-new Date(b.c.date);});
 
   const ventesL = opsListings.filter(l=>["ferme","vendu"].includes(l.status));
-  const volVendu = ventesL.reduce((s,l)=>s+opsParsePx(l.offerPrice||l.price),0);
+  const ventesP = opsPurchases.filter(p=>OPS_PURCHASE_SOLD.includes(p.status||"active"));
+  const volVendu = ventesL.reduce((s,l)=>s+opsParsePx(l.offerPrice||l.price),0) + ventesP.reduce((s,p)=>s+opsParsePx(p.price),0);
   const commVendu = volVendu*0.02;
+  const nbVendu = ventesL.length + ventesP.length;
 
   return `
   <div class="ops-kpi-grid" style="grid-template-columns:repeat(5,minmax(0,1fr));">
@@ -535,7 +556,7 @@ function opsRenderDash() {
     <div class="ops-kpi" style="border-left-color:#378ADD"><div class="ops-kpi-l">Volume immobilier</div><div class="ops-kpi-v">${opsFmtPx(vol)}</div><div class="ops-kpi-s">valeur totale des dossiers</div></div>
     <div class="ops-kpi" style="border-left-color:#1D9E75"><div class="ops-kpi-l">Commission estimée</div><div class="ops-kpi-v">${opsFmtPx(comm)}</div><div class="ops-kpi-s">2% du volume</div></div>
     <div class="ops-kpi" style="border-left-color:${urgCount>0?"#E24B4A":"#888780"}"><div class="ops-kpi-l">Conditions urgentes</div><div class="ops-kpi-v" style="color:${urgCount>0?"#E24B4A":"var(--text)"}">${urgCount}</div><div class="ops-kpi-s">délai ≤ 3 jours</div></div>
-    <div class="ops-kpi" style="border-left-color:#534AB7;background:#F4F3FF;"><div class="ops-kpi-l" style="color:#534AB7;">Volume d'affaire vendu</div><div class="ops-kpi-v" style="color:#534AB7;">${opsFmtPx(volVendu)}</div><div class="ops-kpi-s" style="color:#534AB7;">${ventesL.length} dossier${ventesL.length!==1?"s":""} · comm. ${opsFmtPx(commVendu)}</div></div>
+    <div class="ops-kpi" style="border-left-color:#534AB7;background:#F4F3FF;"><div class="ops-kpi-l" style="color:#534AB7;">Volume d'affaire vendu</div><div class="ops-kpi-v" style="color:#534AB7;">${opsFmtPx(volVendu)}</div><div class="ops-kpi-s" style="color:#534AB7;">${nbVendu} dossier${nbVendu!==1?"s":""} · comm. ${opsFmtPx(commVendu)}</div></div>
   </div>
   <div class="ops-two-col">
     <div class="ops-card">
@@ -586,7 +607,14 @@ function opsRenderListings() {
     <div class="ops-listing-hdr">
       <div>
         <div class="ops-addr-big">${l.addr} <span class="ops-status-badge" style="background:${OPS_STATUS_COLORS[l.status]}20;color:${OPS_STATUS_COLORS[l.status]};border:1px solid ${OPS_STATUS_COLORS[l.status]}40">${OPS_STATUS_LABELS[l.status]}</span></div>
-        <div class="ops-listing-sub">${[l.seller,l.agent].filter(Boolean).join(" · ")}${l.price?` · Inscrit: ${l.price}`:""}${l.offerPrice?` · <strong style="color:#1D9E75;">Offre: ${l.offerPrice}</strong>`:""}</div>
+        <div class="ops-listing-sub">${[l.seller,l.agent].filter(Boolean).join(" · ")}</div>
+        <div style="display:flex;align-items:center;gap:16px;margin-top:6px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:12px;color:var(--text-3);">Prix inscrit :</span>
+            <input type="text" value="${l.price||""}" onchange="opsUpdateListingPrice('${l.id}','price',this.value)" style="font-size:13px;font-weight:500;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);width:140px;" placeholder="ex: 549 000 $" />
+          </div>
+          ${l.offerPrice?`<div style="display:flex;align-items:center;gap:6px;"><span style="font-size:12px;color:var(--text-3);">Prix offre :</span><input type="text" value="${l.offerPrice||""}" onchange="opsUpdateListingPrice('${l.id}','offerPrice',this.value)" style="font-size:13px;font-weight:600;padding:3px 8px;border-radius:6px;border:1px solid #1D9E75;background:var(--surface);color:#1D9E75;width:140px;" /></div>`:""}
+        </div>
       </div>
       <div class="ops-lactions">
         ${l.status==="active"?`<button class="btn-primary" style="font-size:13px;padding:7px 16px;background:#1D9E75;border:none;" onclick="opsAccepterOffre('${l.id}')">✓ Offre reçue</button>`:""}
@@ -617,12 +645,26 @@ function opsRenderPurchases() {
   const pr = opsPProg(p);
   const r=32; const circ=2*Math.PI*r; const off=circ-(pr.pct/100)*circ;
   const rc = pr.pct===100?"#1D9E75":pr.pct>50?"#378ADD":"#BA7517";
+  const pStatus = p.status||"active";
+  const pStatusColor = OPS_PURCHASE_STATUS_COLORS[pStatus]||"#888780";
+  const pStatusLabel = OPS_PURCHASE_STATUS_LABELS[pStatus]||"Actif";
 
   const tabs = opsPurchases.map(pu=>{
     const short=pu.addr.length>22?pu.addr.substring(0,20)+"…":pu.addr;
     const urg=opsHasUrg(pu.conditions);
-    return `<div class="ops-rec-tab${opsActivePid===pu.id?" active":""}" onclick="opsSetPTab('${pu.id}')">${short}${urg?'<span class="ops-urgdot"></span>':""}</div>`;
+    const isSold=OPS_PURCHASE_SOLD.includes(pu.status||"active");
+    return `<div class="ops-rec-tab${opsActivePid===pu.id?" active":""}" onclick="opsSetPTab('${pu.id}')">${short}${urg?'<span class="ops-urgdot"></span>':""}${isSold?'<span style="width:7px;height:7px;border-radius:50%;background:#534AB7;display:inline-block;margin-left:3px;"></span>':""}</div>`;
   }).join("");
+
+  // Status progression buttons
+  const statusFlow = [
+    {key:"offre", label:"✓ Offre acceptée", color:"#185FA5"},
+    {key:"cond", label:"✓ Conditions réalisées", color:"#1D9E75"},
+    {key:"notarie", label:"✓ Notarié", color:"#534AB7"},
+  ];
+  const currentIdx = ["active","offre","cond","notarie"].indexOf(pStatus);
+  const nextStep = statusFlow.find((s,i)=>i>=currentIdx);
+  const statusBtn = nextStep ? `<button class="btn-primary" style="font-size:13px;padding:7px 16px;background:${nextStep.color};border:none;" onclick="opsSetPurchaseStatus('${p.id}','${nextStep.key}')">${nextStep.label}</button>` : "";
 
   return `
     <div class="ops-rec-tabs">${tabs}</div>
@@ -633,12 +675,22 @@ function opsRenderPurchases() {
           <div class="ops-ring-pct">${pr.pct}%</div>
         </div>
         <div>
-          <div class="ops-addr-big">${p.addr}</div>
-          <div class="ops-listing-sub">${[p.buyer,p.price,p.agent].filter(Boolean).join(" · ")}</div>
-          <div style="font-size:12px;color:var(--text-3);margin-top:4px;">${pr.dn} condition${pr.dn!==1?"s":""} levée${pr.dn!==1?"s":""} sur ${pr.tot}</div>
+          <div class="ops-addr-big">${p.addr} <span class="ops-status-badge" style="background:${pStatusColor}20;color:${pStatusColor};border:1px solid ${pStatusColor}40">${pStatusLabel}</span></div>
+          <div class="ops-listing-sub">${[p.buyer,p.agent].filter(Boolean).join(" · ")}</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="font-size:12px;color:var(--text-3);">Prix :</span>
+              <input type="text" value="${p.price||""}" onchange="opsUpdatePurchasePrice('${p.id}',this.value)" style="font-size:13px;font-weight:600;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);width:140px;" placeholder="ex: 489 000 $" />
+            </div>
+            <div style="font-size:12px;color:var(--text-3);">${pr.dn} condition${pr.dn!==1?"s":""} levée${pr.dn!==1?"s":""} sur ${pr.tot}</div>
+          </div>
         </div>
       </div>
-      ${isAdmin?`<button class="btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="opsDeletePurchase('${p.id}')">Supprimer</button>`:""}
+      <div class="ops-lactions">
+        ${statusBtn}
+        ${pStatus!=="active"?`<button class="btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="opsSetPurchaseStatus('${p.id}','active')">↩ Réinitialiser</button>`:""}
+        ${isAdmin?`<button class="btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="opsDeletePurchase('${p.id}')">Supprimer</button>`:""}
+      </div>
     </div>
     ${opsCondsBlock("p", p)}`;
 }
@@ -647,7 +699,8 @@ function opsRenderVentes() {
   const ventes = opsListings.filter(l=>["ferme","vendu"].includes(l.status));
   if (!ventes.length) return `<div class="empty-state"><div class="empty-icon">◩</div><div class="empty-title">Aucune vente conclue</div><div class="empty-sub">Les dossiers en vente ferme et vendus apparaîtront ici.</div></div>`;
 
-  const totalVol = ventes.reduce((s,l)=>s+opsParsePx(l.offerPrice||l.price),0);
+  const ventesAchats = opsPurchases.filter(p=>OPS_PURCHASE_SOLD.includes(p.status||"active"));
+  const totalVol = ventes.reduce((s,l)=>s+opsParsePx(l.offerPrice||l.price),0) + ventesAchats.reduce((s,p)=>s+opsParsePx(p.price),0);
   const totalComm = totalVol*0.02;
 
   const rows = ventes.map(l=>{
