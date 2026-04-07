@@ -1232,3 +1232,20 @@ body {
   .ops-two-col { grid-template-columns:1fr; }
   .ops-stats-row { grid-template-columns:repeat(2,1fr); }
 }
+
+/* ── Ventes tab ───────────────────────────────────────────── */
+.ops-ventes-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:1.25rem; }
+.ops-vente-kpi { background:var(--bg); border-radius:var(--radius); padding:1rem; border-left:3px solid #534AB7; }
+.ops-vente-row { padding:1rem; border-bottom:1px solid var(--border); }
+.ops-vente-row:last-child { border-bottom:none; }
+.ops-vente-row:hover { background:var(--bg); }
+.ops-vente-main { margin-bottom:.75rem; }
+.ops-vente-addr { font-size:14px; font-weight:600; color:var(--text); margin-bottom:2px; }
+.ops-vente-meta { font-size:12px; color:var(--text-2); }
+.ops-vente-fields { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; align-items:center; }
+.ops-vente-field-label { font-size:11px; color:var(--text-3); text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
+.ops-vente-field-val { font-size:14px; font-weight:600; color:var(--text); }
+@media (max-width:700px) {
+  .ops-vente-fields { grid-template-columns:repeat(2,1fr); }
+  .ops-ventes-summary { grid-template-columns:1fr 1fr; }
+}
