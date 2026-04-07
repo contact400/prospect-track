@@ -696,20 +696,23 @@ function opsRenderPurchases() {
 }
 
 function opsRenderVentes() {
-  const ventes = opsListings.filter(l=>["ferme","vendu"].includes(l.status));
-  if (!ventes.length) return `<div class="empty-state"><div class="empty-icon">◩</div><div class="empty-title">Aucune vente conclue</div><div class="empty-sub">Les dossiers en vente ferme et vendus apparaîtront ici.</div></div>`;
-
-  const ventesAchats = opsPurchases.filter(p=>OPS_PURCHASE_SOLD.includes(p.status||"active"));
-  const totalVol = ventes.reduce((s,l)=>s+opsParsePx(l.offerPrice||l.price),0) + ventesAchats.reduce((s,p)=>s+opsParsePx(p.price),0);
+  const ventesL = opsListings.filter(l=>["ferme","vendu"].includes(l.status));
+  const ventesP = opsPurchases.filter(p=>OPS_PURCHASE_SOLD.includes(p.status||"active"));
+  const totalVol = ventesL.reduce((s,l)=>s+opsParsePx(l.offerPrice||l.price),0) + ventesP.reduce((s,p)=>s+opsParsePx(p.price),0);
   const totalComm = totalVol*0.02;
+  const nbTotal = ventesL.length + ventesP.length;
 
-  const rows = ventes.map(l=>{
+  if (!nbTotal) return `<div class="empty-state"><div class="empty-icon">◩</div><div class="empty-title">Aucune vente conclue</div><div class="empty-sub">Les inscriptions en vente ferme/vendu et les achats en conditions réalisées/notariés apparaîtront ici.</div></div>`;
+
+  const listingRows = ventesL.map(l=>{
     const px = opsParsePx(l.offerPrice||l.price);
     const statusColor = l.status==="vendu"?"#534AB7":"#1D9E75";
-    const statusLabel = OPS_STATUS_LABELS[l.status];
     return `<div class="ops-vente-row">
       <div class="ops-vente-main">
-        <div class="ops-vente-addr">${l.addr}</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:11px;padding:2px 8px;border-radius:99px;background:#E1F5EE;color:#085041;font-weight:500;">Inscription</span>
+          <div class="ops-vente-addr">${l.addr}</div>
+        </div>
         <div class="ops-vente-meta">${[l.seller,l.agent].filter(Boolean).join(" · ")}</div>
       </div>
       <div class="ops-vente-fields">
@@ -728,7 +731,39 @@ function opsRenderVentes() {
         </div>
         <div class="ops-vente-field">
           <div class="ops-vente-field-label">Statut</div>
-          <span style="font-size:12px;font-weight:500;padding:3px 10px;border-radius:99px;background:${statusColor}20;color:${statusColor};border:1px solid ${statusColor}40;">${statusLabel}</span>
+          <span style="font-size:12px;font-weight:500;padding:3px 10px;border-radius:99px;background:${statusColor}20;color:${statusColor};border:1px solid ${statusColor}40;">${OPS_STATUS_LABELS[l.status]}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+
+  const purchaseRows = ventesP.map(p=>{
+    const px = opsParsePx(p.price);
+    const statusColor = OPS_PURCHASE_STATUS_COLORS[p.status]||"#534AB7";
+    return `<div class="ops-vente-row">
+      <div class="ops-vente-main">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:11px;padding:2px 8px;border-radius:99px;background:#FAEEDA;color:#633806;font-weight:500;">Achat</span>
+          <div class="ops-vente-addr">${p.addr}</div>
+        </div>
+        <div class="ops-vente-meta">${[p.buyer,p.agent].filter(Boolean).join(" · ")}</div>
+      </div>
+      <div class="ops-vente-fields">
+        <div class="ops-vente-field">
+          <div class="ops-vente-field-label">Prix d'achat</div>
+          <div class="ops-vente-field-val">${opsFmtPx(px)}</div>
+        </div>
+        <div class="ops-vente-field">
+          <div class="ops-vente-field-label">Commission est.</div>
+          <div class="ops-vente-field-val" style="color:#1D9E75;">${px?opsFmtPx(px*0.02):"—"}</div>
+        </div>
+        <div class="ops-vente-field">
+          <div class="ops-vente-field-label">Date du notaire</div>
+          <input type="date" value="${p.notaryDate||""}" onchange="opsUpdatePurchaseNotaryDate('${p.id}',this.value)" style="font-size:12px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);width:145px;" />
+        </div>
+        <div class="ops-vente-field">
+          <div class="ops-vente-field-label">Statut</div>
+          <span style="font-size:12px;font-weight:500;padding:3px 10px;border-radius:99px;background:${statusColor}20;color:${statusColor};border:1px solid ${statusColor}40;">${OPS_PURCHASE_STATUS_LABELS[p.status]}</span>
         </div>
       </div>
     </div>`;
@@ -736,15 +771,20 @@ function opsRenderVentes() {
 
   return `
     <div class="ops-ventes-summary">
-      <div class="ops-vente-kpi"><div class="ops-kpi-l">Dossiers conclus</div><div class="ops-kpi-v">${ventes.length}</div></div>
+      <div class="ops-vente-kpi"><div class="ops-kpi-l">Dossiers conclus</div><div class="ops-kpi-v">${nbTotal}</div><div class="ops-kpi-s">${ventesL.length} inscription${ventesL.length!==1?"s":""} · ${ventesP.length} achat${ventesP.length!==1?"s":""}</div></div>
       <div class="ops-vente-kpi"><div class="ops-kpi-l">Volume total</div><div class="ops-kpi-v">${opsFmtPx(totalVol)}</div></div>
       <div class="ops-vente-kpi"><div class="ops-kpi-l">Commission totale est.</div><div class="ops-kpi-v" style="color:#1D9E75;">${opsFmtPx(totalComm)}</div></div>
     </div>
-    <div class="ops-card">${rows}</div>`;
+    ${ventesL.length?`<div style="font-size:11px;font-weight:500;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem;">Inscriptions</div><div class="ops-card" style="margin-bottom:1rem;">${listingRows}</div>`:""}
+    ${ventesP.length?`<div style="font-size:11px;font-weight:500;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem;">Achats</div><div class="ops-card">${purchaseRows}</div>`:""}`;
 }
 
 window.opsUpdateNotaryDate = async function(lid, val) {
   await updateDoc(doc(db,"ops_listings",lid),{notaryDate:val,updatedAt:serverTimestamp()});
+};
+
+window.opsUpdatePurchaseNotaryDate = async function(pid, val) {
+  await updateDoc(doc(db,"ops_purchases",pid),{notaryDate:val,updatedAt:serverTimestamp()});
 };
 
 function opsCondsBlock(type, rec) {
