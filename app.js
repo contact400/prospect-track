@@ -4,7 +4,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, setDoc,
-  onSnapshot, query, orderBy, serverTimestamp
+  onSnapshot, query, orderBy, serverTimestamp, where
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 let currentUser = null;
@@ -16,320 +16,684 @@ let exportMode = false;
 let selectedMLS = new Set();
 let unsubscribeProspects = null;
 let unsubscribeTargets = null;
+let unsubscribeOpsListings = null;
+let unsubscribeOpsPurchases = null;
 let todaysTargets = [];
 let activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all", type: "all" };
 let selectedMunicipalities = new Set();
 let dupReviewMode = false;
 
+// ── Ops state ──────────────────────────────────────────────
+let opsListings = [];
+let opsPurchases = [];
+let opsView = "dash"; // "dash" | "listings" | "purchases"
+let opsActiveLid = null;
+let opsActivePid = null;
+
 // ── Bonus structures ───────────────────────────────────────
 const BONUS_STRUCTURES = {
-  "benjamin": {
-    tiers: [
-      { doors: 120, sale: 33, purchase: 25, label: "Tier 1" },
-      { doors: 170, sale: 45, purchase: 35, label: "Tier 2" }
-    ]
-  },
-  "afshin": {
-    tiers: [
-      { doors: 100, sale: 55, purchase: 35, label: "Tier 1" },
-      { doors: 150, sale: 70, purchase: 50, label: "Tier 2" }
-    ]
-  },
-  "default": {
-    tiers: [
-      { doors: 100, sale: 33, purchase: 25, label: "Tier 1" },
-      { doors: 150, sale: 45, purchase: 35, label: "Tier 2" }
-    ]
-  }
+  "benjamin": { tiers: [{ doors:120, sale:33, purchase:25, label:"Tier 1" },{ doors:170, sale:45, purchase:35, label:"Tier 2" }] },
+  "afshin":   { tiers: [{ doors:100, sale:55, purchase:35, label:"Tier 1" },{ doors:150, sale:70, purchase:50, label:"Tier 2" }] },
+  "default":  { tiers: [{ doors:100, sale:33, purchase:25, label:"Tier 1" },{ doors:150, sale:45, purchase:35, label:"Tier 2" }] }
 };
-
 function getBonusStructure(name) {
   if (!name) return BONUS_STRUCTURES.default;
   const key = name.toLowerCase().split(" ")[0];
   return BONUS_STRUCTURES[key] || BONUS_STRUCTURES.default;
 }
 
+// ── SOP Phases ─────────────────────────────────────────────
+const OPS_PHASES = [
+  {id:"p1",label:"Phase 1 — Premier contact",color:"#1D9E75",tasks:[
+    {id:"t101",name:"Réception de l'appel / sollicitation",who:"Karim",tool:"Téléphone / FUB",time:"Dès réception",det:"Qualifier : motivation, échéancier, projet d'achat parallèle."},
+    {id:"t102",name:"Qualification approfondie du client",who:"Karim",tool:"Script qualification",time:"1er appel",det:"Pourquoi vendez-vous? Quand souhaitez-vous être sorti?"},
+    {id:"t103",name:"Planification du rendez-vous d'évaluation",who:"Karim / Sara",tool:"Calendrier Google",time:"Lors du 1er appel",det:"Proposer 2 plages. Confirmer adresse, durée (1h30)."},
+    {id:"t104",name:"Création de la fiche client dans Follow Up Boss",who:"Sara",tool:"Follow Up Boss",time:"Dans les 2h",det:"Nom, téléphone, courriel, adresse, source du lead."},
+    {id:"t105",name:"Ajout dans le pipeline FUB",who:"Sara",tool:"Follow Up Boss",time:"Même journée",det:"Pipeline vendeur. Étape: Premier contact."},
+  ]},
+  {id:"p2",label:"Phase 2 — Avant le rendez-vous",color:"#378ADD",tasks:[
+    {id:"t201",name:"Envoi du courriel de confirmation",who:"Sara",tool:"FUB / Gmail",time:"Dans les 24h",det:"Adresse, date, heure, courtier, durée estimée."},
+    {id:"t202",name:"Envoi du guide vendeur-acheteur",who:"Sara",tool:"FUB / Gmail",time:"Avec la confirmation",det:"Document BACHA expliquant le processus de vente."},
+    {id:"t203",name:"Ajout du RV au calendrier du courtier",who:"Sara",tool:"Calendrier Google",time:"Dès confirmation",det:"Inclure: adresse, nom client, téléphone, notes."},
+    {id:"t204",name:"Recherche des données Matrix (historique)",who:"Karim",tool:"Matrix Centris",time:"La veille",det:"Jours sur le marché, réductions, historique d'expiration."},
+    {id:"t205",name:"Préparation du CMA",who:"Karim",tool:"Matrix Centris / Excel",time:"La veille",det:"5–8 comparables. Ajuster pour superficie, âge, finitions."},
+    {id:"t206",name:"Préparation des documents (CCEV + DV)",who:"Karim / Sara",tool:"EZmax",time:"La veille",det:"Contrat de courtage, DV, consentement."},
+    {id:"t207",name:"Appel la veille : collecte de données",who:"Karim",tool:"Téléphone",time:"La veille",det:"Superficie, chauffage, stationnement, rénovations."},
+    {id:"t208",name:"Appel de confirmation le matin même",who:"Sara",tool:"Téléphone",time:"Matin du RV",det:"Confirmer disponibilité et accès à la propriété."},
+  ]},
+  {id:"p3",label:"Phase 3 — Rendez-vous d'évaluation",color:"#BA7517",tasks:[
+    {id:"t301",name:"Visite complète de la propriété",who:"Karim",tool:"En personne",time:"Lors du RV",det:"Notes sur chaque pièce, état général, points de vente."},
+    {id:"t302",name:"Analyse forces/faiblesses",who:"Karim",tool:"En personne",time:"Lors du RV",det:"Identifier ce qui maximise la valeur."},
+    {id:"t303",name:"Discussion sur les objectifs et attentes",who:"Karim",tool:"En personne",time:"Lors du RV",det:"Prix cible, délai souhaité, flexibilité sur conditions."},
+    {id:"t304",name:"Présentation de la stratégie BACHA",who:"Karim",tool:"Présentation Canva",time:"Lors du RV",det:"Photo pro, Centris, RE/MAX, réseaux sociaux, pub."},
+    {id:"t305",name:"Présentation et discussion du CMA",who:"Karim",tool:"CMA préparé",time:"Lors du RV",det:"Comparables. Recommander fourchette réaliste."},
+    {id:"t306",name:"Signature du contrat de courtage",who:"Karim",tool:"Contrat / EZmax",time:"Lors du RV",det:"Si signature: Phase 4B. Si non: Phase 4A."},
+  ]},
+  {id:"p4a",label:"Phase 4A — Pas de signature",color:"#888780",tasks:[
+    {id:"t401",name:"Créer une tâche de suivi dans FUB",who:"Sara",tool:"Follow Up Boss",time:"Le jour même",det:"Raison du non-signature, point de blocage, rappel."},
+    {id:"t402",name:"Maintenir dans le pipeline — «En réflexion»",who:"Sara",tool:"Follow Up Boss",time:"En continu",det:"Relancer toutes les 1–2 semaines."},
+  ]},
+  {id:"p4b",label:"Phase 4B — Après signature",color:"#534AB7",tasks:[
+    {id:"t411",name:"Collecte : acte de vente / titre",who:"Sara",tool:"Courriel / en personne",time:"Dans les 48h",det:"Obtenir via le notaire si introuvable."},
+    {id:"t412",name:"Collecte : taxes municipale et scolaire",who:"Sara",tool:"Courriel",time:"Dans les 48h",det:"Requis pour Centris et pour informer les acheteurs."},
+    {id:"t413",name:"Collecte : factures de rénovations",who:"Sara",tool:"Courriel",time:"Dans les 48h",det:"Valorise la propriété. Utile pour justifier le prix."},
+    {id:"t414",name:"Collecte : certificat de localisation",who:"Sara",tool:"Courriel / notaire",time:"Dans les 48h",det:"Vérifier si à jour (moins de 10 ans)."},
+    {id:"t415",name:"Remplir les Déclarations du vendeur (DV)",who:"Karim",tool:"EZmax / formulaire",time:"Dans les 48h",det:"Passer chaque question. Signaler défauts connus."},
+    {id:"t416",name:"Création du groupe WhatsApp",who:"Sara",tool:"WhatsApp",time:"Dès signature",det:"Inclure: Karim, courtier responsable, Sara."},
+    {id:"t417",name:"Planification de la séance photo",who:"Sara",tool:"Contact photographe",time:"Dans les 24h",det:"Propriété propre, rangée, bien éclairée."},
+    {id:"t418",name:"Inscription sur Centris (Matrix)",who:"Karim",tool:"Matrix Centris",time:"Dans les 24h après photos",det:"Tous les champs, DV jointe."},
+    {id:"t419",name:"Création du dossier sur EZmax",who:"Sara",tool:"EZmax",time:"En même temps que Centris",det:"Tous les documents versés au dossier."},
+    {id:"t420",name:"Création du matériel marketing",who:"Benjamin",tool:"Canva / Meta / Site BACHA",time:"Avant mise en ligne",det:"Fiche visite libre, carrousel, publication site."},
+    {id:"t421",name:"Installation du panneau BACHA",who:"Benjamin",tool:"Kit panneau BACHA",time:"Jour de mise en ligne",det:"Confirmer avec le vendeur. Photo du panneau."},
+  ]},
+  {id:"p5",label:"Phase 5 — Mise en marché",color:"#993C1D",tasks:[
+    {id:"t501",name:"Activation sur Centris / RE/MAX / site web",who:"Karim",tool:"Matrix Centris",time:"À la date convenue",det:"Activer quand photos, DV et description sont complètes."},
+    {id:"t502",name:"Publication sur les réseaux sociaux",who:"Benjamin",tool:"Meta Business Suite",time:"Jour de mise en ligne",det:"Carrousel + prix + lien Centris. Story + publication."},
+    {id:"t503",name:"Lancement campagne publicitaire Meta",who:"Benjamin",tool:"Meta Ads Manager",time:"Dans les 48h",det:"Cibler Laval + environs. Budget 5–15$/jour. 14 jours."},
+    {id:"t504",name:"Recherche automatisée acheteurs",who:"Sara",tool:"Matrix Centris / FUB",time:"Jour de mise en ligne",det:"Alerte automatique pour acheteurs correspondants."},
+    {id:"t505",name:"Organisation des visites via Immocontact",who:"Sara",tool:"Immocontact",time:"En continu",det:"Configurer disponibilité. Répondre dans les 2h."},
+    {id:"t506",name:"Ajout des visites au calendrier",who:"Sara",tool:"Calendrier Google",time:"Dès confirmation",det:"Adresse, nom acheteur/courtier, heure."},
+    {id:"t507",name:"Système de rétroaction après visite",who:"Sara",tool:"Immocontact / courriel",time:"Avant 1ère visite",det:"Feedback automatique. Compiler pour rapport."},
+    {id:"t508",name:"Rapport hebdomadaire au vendeur",who:"Karim",tool:"Téléphone / courriel",time:"Chaque semaine",det:"Visites, vues Centris, feedbacks, ajustement prix."},
+  ]},
+  {id:"p6",label:"Phase 6 — Offres & négociation",color:"#0F6E56",tasks:[
+    {id:"t601",name:"Réception et révision de la promesse d'achat",who:"Karim",tool:"En personne / téléphone",time:"Dans les 24h",det:"Expliquer clauses: prix, dépôt, conditions, possession."},
+    {id:"t602",name:"Analyse des conditions avec le vendeur",who:"Karim",tool:"En personne",time:"Même séance",det:"Évaluer solidité de l'offre. Recommander stratégie."},
+    {id:"t603",name:"Contre-offre si applicable",who:"Karim",tool:"EZmax / formulaire",time:"Même séance",det:"Ajustements: prix, date, conditions."},
+    {id:"t604",name:"Acceptation ou poursuite des négociations",who:"Karim",tool:"EZmax / téléphone",time:"Selon délais",det:"Documenter échanges verbaux le jour même."},
+    {id:"t605",name:"Envoi du template : suivi des conditions",who:"Sara",tool:"FUB / Gmail",time:"Dès acceptation",det:"Confirmer délais de chaque condition."},
+    {id:"t606",name:"Enregistrement dans FUB et Track",who:"Sara",tool:"FUB / Track app",time:"Le jour même",det:"Prix, courtier, conditions, date limite, possession."},
+  ]},
+  {id:"p7",label:"Phase 7 — Suivi post-offre",color:"#185FA5",tasks:[
+    {id:"t701",name:"Suivi des délais de conditions",who:"Sara",tool:"Track app / Calendrier",time:"Quotidiennement",det:"Rappels 48h avant chaque date limite."},
+    {id:"t702",name:"Rappel courtier acheteur toutes les 4 jours",who:"Karim",tool:"Téléphone / courriel",time:"Toutes les 4 jours",det:"Pression professionnelle. Documenter contacts."},
+    {id:"t703",name:"Coordination de l'inspection préachat",who:"Sara",tool:"Téléphone / Immocontact",time:"Dans les 3 jours",det:"Confirmer inspecteur, date, heure."},
+    {id:"t704",name:"Révision du rapport d'inspection",who:"Karim",tool:"Courriel / en personne",time:"Dans les 24h du rapport",det:"Analyser déficiences. Conseiller sur stratégie."},
+    {id:"t705",name:"Confirmation approbation financement",who:"Karim",tool:"Téléphone / courriel",time:"Avant date limite",det:"Exiger confirmation écrite."},
+    {id:"t706",name:"Obtention de la levée des conditions",who:"Karim",tool:"EZmax / DocuSign",time:"À la date limite",det:"Les deux parties signent. Transaction ferme."},
+    {id:"t707",name:"Transmission des documents au notaire",who:"Sara",tool:"Courriel / portail",time:"Dès l'offre ferme",det:"Acte, DV, CL, promesse, conditions levées."},
+    {id:"t708",name:"Communication continue avec le vendeur",who:"Karim",tool:"Téléphone / WhatsApp",time:"En continu",det:"Tenir informé. Éviter les silences."},
+    {id:"t709",name:"Ajustements si l'offre tombe",who:"Karim / Benjamin",tool:"Matrix Centris / Meta",time:"Dès que confirmé",det:"Remettre active. Revoir prix. Relancer pubs."},
+  ]},
+  {id:"p8",label:"Phase 8 — Préparation au notaire",color:"#633806",tasks:[
+    {id:"t801",name:"Envoi des documents au notaire",who:"Sara",tool:"Courriel / portail",time:"1 semaine avant",det:"DV, CL, promesse, levée des conditions."},
+    {id:"t802",name:"Confirmation date du RV notarié",who:"Sara",tool:"Téléphone / courriel",time:"3–5 jours avant",det:"Confirmer avec notaire ET vendeur."},
+    {id:"t803",name:"Ajouter le RV au calendrier",who:"Sara",tool:"Calendrier Google",time:"Dès confirmation",det:"Adresse bureau, nom notaire, numéro de dossier."},
+    {id:"t804",name:"Rappel final au client",who:"Karim / Sara",tool:"Téléphone / SMS",time:"2–3 jours avant",det:"Pièces d'identité, disponibilité."},
+    {id:"t805",name:"Rappel annulation / transfert des services",who:"Sara",tool:"Courriel / SMS",time:"1 semaine avant",det:"Assurance, Hydro-Québec, Énergir, taxes."},
+    {id:"t806",name:"Préparer relevé de commission",who:"Sara",tool:"Track app / Excel",time:"1 semaine avant",det:"Commission brute, partages, primes BACHA."},
+  ]},
+  {id:"p9",label:"Phase 9 — Après la vente",color:"#3C3489",tasks:[
+    {id:"t901",name:"Suivi lors de la signature chez le notaire",who:"Karim",tool:"En personne / téléphone",time:"Jour de signature",det:"Présence recommandée. Opportunité pour référence."},
+    {id:"t902",name:"Fermeture administrative dans FUB et Track",who:"Sara",tool:"FUB / Track app",time:"Jour de signature",det:"Statut: Vendu. Prix final, commission, agent."},
+    {id:"t903",name:"Remise des clés",who:"Karim / Benjamin / Afshin",tool:"En personne",time:"Jour de possession",det:"Clés, télécommandes, codes remis à l'acheteur."},
+    {id:"t904",name:"Envoi cadeau / mot de remerciement",who:"Karim",tool:"Cadeau / carte manuscrite",time:"Dans les 3 jours",det:"Budget 50–150$. Génère des références."},
+    {id:"t905",name:"Demande d'avis Google",who:"Karim",tool:"SMS / courriel",time:"3–5 jours après",det:"Lien direct Google. Relancer une fois si nécessaire."},
+    {id:"t906",name:"Suivi post-transaction",who:"Karim",tool:"Téléphone / WhatsApp",time:"2–4 semaines après",det:"Déménagement ok? Achat en vue? Références?"},
+    {id:"t907",name:"Ajouter à la liste de nurture long terme",who:"Sara",tool:"FUB / Mailchimp",time:"Dans la semaine",det:"Étiqueter: Client passé. Campagnes annuelles."},
+  ]},
+];
+
+const OPS_ALL_TASKS = OPS_PHASES.flatMap(p => p.tasks);
+const OPS_STATUS_LABELS = {active:"Actif",offre:"Offre reçue",ferme:"Vente ferme",vendu:"Vendu"};
+const OPS_STATUS_COLORS = {active:"#1D9E75",offre:"#185FA5",ferme:"#534AB7",vendu:"#888780"};
+
+
+// ── Helpers ────────────────────────────────────────────────
 function detectPropertyType(address) {
   if (!address) return "house";
   const a = address.toLowerCase();
   if (/\bapp\.?\s*\d|#\s*\d|\bapt\.?\s*\d|, app |, apt |bureau\s*\d|suite\s*\d|unit\s*\d|\bunité\s*\d/.test(a)) return "condo";
   return "house";
 }
-
 function extractMunicipality(address) {
   if (!address) return "Unknown";
   const match = address.match(/\(([^)]+)\)/);
   if (match) return match[1].trim();
   return "Unknown";
 }
-
 function getMunicipalities() {
   const set = new Set(allProspects.map(p => extractMunicipality(p.listingAddress)));
   return [...set].filter(m => m && m !== "Unknown").sort();
 }
-
 function findDuplicateMLS() {
-  const seen = {};
-  const dups = new Set();
-  allProspects.forEach(p => {
-    if (seen[p.mls]) dups.add(p.mls);
-    else seen[p.mls] = true;
-  });
+  const seen = {}; const dups = new Set();
+  allProspects.forEach(p => { if (seen[p.mls]) dups.add(p.mls); else seen[p.mls] = true; });
   return dups;
 }
-
-function getDupProspects() {
-  const dupMLS = findDuplicateMLS();
-  return allProspects.filter(p => dupMLS.has(p.mls));
-}
-
+function getDupProspects() { const d = findDuplicateMLS(); return allProspects.filter(p => d.has(p.mls)); }
 function getDupGroups() {
-  const dupMLS = findDuplicateMLS();
-  const groups = {};
-  allProspects.forEach(p => {
-    if (dupMLS.has(p.mls)) {
-      if (!groups[p.mls]) groups[p.mls] = [];
-      groups[p.mls].push(p);
-    }
-  });
-  Object.values(groups).forEach(group => {
-    group.sort((a, b) => {
-      const ta = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
-      const tb = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
-      return ta - tb;
-    });
-  });
+  const dupMLS = findDuplicateMLS(); const groups = {};
+  allProspects.forEach(p => { if (dupMLS.has(p.mls)) { if (!groups[p.mls]) groups[p.mls]=[]; groups[p.mls].push(p); } });
+  Object.values(groups).forEach(g => g.sort((a,b) => { const ta=a.createdAt?.toMillis?a.createdAt.toMillis():0; const tb=b.createdAt?.toMillis?b.createdAt.toMillis():0; return ta-tb; }));
   return groups;
 }
-
-function getTodayKey() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function getMonthKey(date) {
-  const d = date || new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-// ── Visits & performance helpers ───────────────────────────
+function getTodayKey() { return new Date().toISOString().slice(0,10); }
+function getMonthKey(date) { const d=date||new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
 function getVisitsForAgent(agentId, monthKey) {
-  let count = 0;
-  let evals = 0;
-  allProspects.forEach(p => {
-    (p.visits || []).forEach(v => {
-      if (v.agentId !== agentId) return;
-      if (!v.date) return;
-      const vMonth = v.date.slice(0, 7);
-      if (monthKey && vMonth !== monthKey) return;
-      count++;
-      if (v.evalBooked === "yes") evals++;
-    });
-  });
-  return { doors: count, evals };
+  let count=0; let evals=0;
+  allProspects.forEach(p => { (p.visits||[]).forEach(v => { if (v.agentId!==agentId) return; if (!v.date) return; const vM=v.date.slice(0,7); if (monthKey&&vM!==monthKey) return; count++; if (v.evalBooked==="yes") evals++; }); });
+  return {doors:count,evals};
 }
-
 function getMonthlyHistory(agentId) {
   const months = {};
-  allProspects.forEach(p => {
-    (p.visits || []).forEach(v => {
-      if (v.agentId !== agentId) return;
-      if (!v.date) return;
-      const mk = v.date.slice(0, 7);
-      if (!months[mk]) months[mk] = { doors: 0, evals: 0 };
-      months[mk].doors++;
-      if (v.evalBooked === "yes") months[mk].evals++;
-    });
-  });
-  return Object.entries(months).sort((a, b) => b[0].localeCompare(a[0]));
+  allProspects.forEach(p => { (p.visits||[]).forEach(v => { if (v.agentId!==agentId||!v.date) return; const mk=v.date.slice(0,7); if (!months[mk]) months[mk]={doors:0,evals:0}; months[mk].doors++; if (v.evalBooked==="yes") months[mk].evals++; }); });
+  return Object.entries(months).sort((a,b)=>b[0].localeCompare(a[0]));
 }
 
+// ── Ops helpers ────────────────────────────────────────────
+function opsCanAccess(doc) {
+  if (isAdmin) return true;
+  return (doc.assignedTo || []).includes(currentUser.uid);
+}
+function opsParsePx(s) { if (!s) return 0; const n = s.replace(/[^0-9]/g,""); return n ? parseInt(n) : 0; }
+function opsFmtPx(n) { if (!n) return "—"; if (n>=1000000) return (n/1000000).toFixed(2).replace(/\.?0+$/,"")+"M $"; return Math.round(n/1000)+"K $"; }
+function opsDaysUntil(ds) { if (!ds) return null; const t=new Date(); t.setHours(0,0,0,0); const d=new Date(ds); d.setHours(0,0,0,0); return Math.round((d-t)/86400000); }
+function opsCondInfo(c) {
+  if (c.done) return {cls:"ops-cb-done",txt:"Levée",urg:false};
+  if (!c.date) return {cls:"ops-cb-none",txt:"Sans date",urg:false};
+  const d = opsDaysUntil(c.date);
+  if (d<0) return {cls:"ops-cb-urg",txt:"Expirée",urg:true};
+  if (d<=3) return {cls:"ops-cb-urg ops-pulse",txt:d===0?"Auj.":d+"j",urg:true};
+  if (d<=7) return {cls:"ops-cb-warn",txt:d+"j restants",urg:false};
+  return {cls:"ops-cb-ok",txt:d+"j restants",urg:false};
+}
+function opsFmtDate(ds) { if (!ds) return "—"; const d=new Date(ds); return d.toLocaleDateString("fr-CA",{day:"numeric",month:"short"}); }
+function opsHasUrg(conds) { return (conds||[]).some(c=>!c.done&&c.date&&opsDaysUntil(c.date)<=3&&opsDaysUntil(c.date)>=0); }
+function opsLProg(l) { const tot=OPS_ALL_TASKS.length; const dn=OPS_ALL_TASKS.filter(t=>(l.checklist||{})[t.id]).length; return {tot,dn,pct:tot?Math.round(dn/tot*100):0}; }
+function opsPProg(p) { const c=p.conditions||[]; return {tot:c.length,dn:c.filter(x=>x.done).length,pct:c.length?Math.round(c.filter(x=>x.done).length/c.length*100):0}; }
+
+// ── Auth ───────────────────────────────────────────────────
 onAuthStateChanged(auth, async (user) => {
-  if (user) {
-    currentUser = user;
-    await loadUserProfile(user.uid);
-    showApp();
-  } else {
-    currentUser = null; currentUserProfile = null; isAdmin = false;
-    todaysTargets = [];
-    showLogin();
-  }
+  if (user) { currentUser=user; await loadUserProfile(user.uid); showApp(); }
+  else { currentUser=null; currentUserProfile=null; isAdmin=false; todaysTargets=[]; showLogin(); }
 });
-
 async function loadUserProfile(uid) {
-  const snap = await getDoc(doc(db, "users", uid));
-  if (snap.exists()) {
-    currentUserProfile = { uid, ...snap.data() };
-    isAdmin = currentUserProfile.role === "admin";
-  }
+  const snap = await getDoc(doc(db,"users",uid));
+  if (snap.exists()) { currentUserProfile={uid,...snap.data()}; isAdmin=currentUserProfile.role==="admin"; }
 }
-
-window.handleLogin = async function () {
-  const email = document.getElementById("loginEmail").value.trim();
-  const password = document.getElementById("loginPassword").value;
-  const btn = document.getElementById("loginBtn");
-  const err = document.getElementById("loginError");
-  err.style.display = "none"; btn.textContent = "Signing in..."; btn.disabled = true;
-  try {
-    await signInWithEmailAndPassword(auth, email, password);
-  } catch (e) {
-    err.textContent = "Invalid email or password. Please try again.";
-    err.style.display = "block"; btn.textContent = "Sign in"; btn.disabled = false;
-  }
+window.handleLogin = async function() {
+  const email=document.getElementById("loginEmail").value.trim();
+  const password=document.getElementById("loginPassword").value;
+  const btn=document.getElementById("loginBtn"); const err=document.getElementById("loginError");
+  err.style.display="none"; btn.textContent="Signing in..."; btn.disabled=true;
+  try { await signInWithEmailAndPassword(auth,email,password); }
+  catch(e) { err.textContent="Invalid email or password."; err.style.display="block"; btn.textContent="Sign in"; btn.disabled=false; }
 };
-
-window.handleLogout = async function () {
+window.handleLogout = async function() {
   if (unsubscribeProspects) unsubscribeProspects();
   if (unsubscribeTargets) unsubscribeTargets();
+  if (unsubscribeOpsListings) unsubscribeOpsListings();
+  if (unsubscribeOpsPurchases) unsubscribeOpsPurchases();
   await signOut(auth);
 };
-
 function showLogin() {
   document.getElementById("loginScreen").classList.add("active");
   document.getElementById("appScreen").classList.remove("active");
-  document.getElementById("loginEmail").value = "";
-  document.getElementById("loginPassword").value = "";
+  document.getElementById("loginEmail").value="";
+  document.getElementById("loginPassword").value="";
 }
-
 function showApp() {
   document.getElementById("loginScreen").classList.remove("active");
   document.getElementById("appScreen").classList.add("active");
-  setupRoleUI();
-  subscribeToProspects();
-  subscribeToTargets();
+  setupRoleUI(); subscribeToProspects(); subscribeToTargets(); subscribeToOps();
   if (isAdmin) { loadAllUsers(); renderDashboard(); }
 }
-
 function setupRoleUI() {
-  const name = currentUserProfile?.name || currentUser.email;
-  const role = isAdmin ? "Admin" : "Agent";
-  document.getElementById("userPill").textContent = `${name} · ${role}`;
-  document.getElementById("mobileUserPill").textContent = `${name} · ${role}`;
+  const name=currentUserProfile?.name||currentUser.email;
+  const role=isAdmin?"Admin":"Agent";
+  document.getElementById("userPill").textContent=`${name} · ${role}`;
+  document.getElementById("mobileUserPill").textContent=`${name} · ${role}`;
   if (isAdmin) {
-    document.getElementById("dashNav").style.display = "";
-    document.getElementById("adminNav").style.display = "";
-    document.getElementById("dashNavMobile").style.display = "";
-    document.getElementById("adminNavMobile").style.display = "";
-    document.getElementById("addProspectBtn").style.display = "";
+    document.getElementById("dashNav").style.display="";
+    document.getElementById("adminNav").style.display="";
+    document.getElementById("dashNavMobile").style.display="";
+    document.getElementById("adminNavMobile").style.display="";
+    document.getElementById("addProspectBtn").style.display="";
   }
+  // Ops nav always shown (access controlled per-dossier)
+  document.getElementById("opsNav").style.display="";
+  document.getElementById("opsNavMobile").style.display="";
 }
 
-window.switchView = function (name, el) {
-  document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
-  document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
+window.switchView = function(name, el) {
+  document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
+  document.querySelectorAll(".nav-item").forEach(n=>n.classList.remove("active"));
   document.getElementById(`view-${name}`).classList.add("active");
-  if (el) document.querySelectorAll(`[data-view="${name}"]`).forEach(n => n.classList.add("active"));
+  if (el) document.querySelectorAll(`[data-view="${name}"]`).forEach(n=>n.classList.add("active"));
   document.getElementById("mobileTitle").textContent =
-    name === "prospects" ? "Prospects" :
-    name === "dashboard" ? "Dashboard" :
-    name === "targets" ? "Today's Targets" :
-    name === "performance" ? "My Performance" : "Admin";
-  if (name === "dashboard") renderDashboard();
-  if (name === "admin") renderAdmin();
-  if (name === "targets") renderTargetsView();
-  if (name === "performance") renderPerformanceView();
+    name==="prospects"?"Prospects":name==="dashboard"?"Dashboard":name==="targets"?"Today's Targets":name==="performance"?"My Performance":name==="ops"?"BACHA Ops":"Admin";
+  if (name==="dashboard") renderDashboard();
+  if (name==="admin") renderAdmin();
+  if (name==="targets") renderTargetsView();
+  if (name==="performance") renderPerformanceView();
+  if (name==="ops") renderOps();
+};
+window.toggleMobileNav = function() { const d=document.getElementById("mobileDrawer"); d.style.display=d.style.display==="block"?"none":"block"; };
+window.closeMobileNav = function() { document.getElementById("mobileDrawer").style.display="none"; };
+
+// ── Ops Firestore subscriptions ────────────────────────────
+function subscribeToOps() {
+  const lq = query(collection(db,"ops_listings"), orderBy("createdAt","desc"));
+  unsubscribeOpsListings = onSnapshot(lq, snap => {
+    opsListings = snap.docs.map(d=>({id:d.id,...d.data()})).filter(opsCanAccess);
+    if (document.getElementById("view-ops").classList.contains("active")) renderOps();
+  });
+  const pq = query(collection(db,"ops_purchases"), orderBy("createdAt","desc"));
+  unsubscribeOpsPurchases = onSnapshot(pq, snap => {
+    opsPurchases = snap.docs.map(d=>({id:d.id,...d.data()})).filter(opsCanAccess);
+    if (document.getElementById("view-ops").classList.contains("active")) renderOps();
+  });
+}
+
+// ── Ops CRUD ───────────────────────────────────────────────
+window.opsOpenNewListing = function() {
+  const agents = allUsers.length ? allUsers : [{uid:currentUser.uid,name:currentUserProfile?.name||"Karim"}];
+  document.getElementById("opsModalContent").innerHTML = `
+    <div class="modal-header"><div class="modal-title">Nouvelle inscription</div><button class="close-x" onclick="closeAllModals()">×</button></div>
+    <div class="mbody-ops">
+      <div class="form-group"><label>Adresse</label><input type="text" id="om-addr" placeholder="123 rue des Érables, Laval"></div>
+      <div class="form-group"><label>Vendeur</label><input type="text" id="om-seller" placeholder="Nom du vendeur"></div>
+      <div class="form-group"><label>Prix demandé</label><input type="text" id="om-price" placeholder="ex: 549 000 $"></div>
+      <div class="form-group"><label>Courtier responsable</label>
+        <select id="om-agent"><option value="Karim">Karim</option><option value="Benjamin">Benjamin</option><option value="Afshin">Afshin</option></select></div>
+      <div class="form-group"><label>Statut</label>
+        <select id="om-status"><option value="active">Actif</option><option value="offre">Offre reçue</option><option value="ferme">Vente ferme</option><option value="vendu">Vendu</option></select></div>
+      ${isAdmin ? `<div class="form-group"><label>Accès agents</label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
+          ${agents.map(u=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" value="${u.uid}" class="ops-assign-cb" checked> ${u.name||u.email}</label>`).join("")}
+        </div></div>` : ""}
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeAllModals()">Annuler</button>
+      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="opsSaveListing()">Enregistrer</button>
+    </div>`;
+  openModal("opsModal");
 };
 
-window.toggleMobileNav = function () {
-  const d = document.getElementById("mobileDrawer");
-  d.style.display = d.style.display === "block" ? "none" : "block";
-};
-window.closeMobileNav = function () {
-  document.getElementById("mobileDrawer").style.display = "none";
+window.opsSaveListing = async function(editId) {
+  const addr = document.getElementById("om-addr").value.trim();
+  if (!addr) return;
+  const assignedTo = isAdmin
+    ? [...document.querySelectorAll(".ops-assign-cb:checked")].map(cb=>cb.value)
+    : [currentUser.uid];
+  const data = {
+    addr, seller: document.getElementById("om-seller").value.trim(),
+    price: document.getElementById("om-price").value.trim(),
+    agent: document.getElementById("om-agent").value,
+    status: document.getElementById("om-status").value,
+    assignedTo, checklist:{}, conditions:[],
+    updatedAt: serverTimestamp()
+  };
+  if (editId) { await updateDoc(doc(db,"ops_listings",editId),data); }
+  else { data.createdAt=serverTimestamp(); data.createdBy=currentUser.uid; const ref=await addDoc(collection(db,"ops_listings"),data); opsActiveLid=ref.id; }
+  closeAllModals(); opsView="listings";
 };
 
+window.opsOpenNewPurchase = function() {
+  document.getElementById("opsModalContent").innerHTML = `
+    <div class="modal-header"><div class="modal-title">Nouvel achat</div><button class="close-x" onclick="closeAllModals()">×</button></div>
+    <div class="mbody-ops">
+      <div class="form-group"><label>Adresse</label><input type="text" id="om-addr" placeholder="456 boul. des Laurentides, Laval"></div>
+      <div class="form-group"><label>Acheteur</label><input type="text" id="om-buyer" placeholder="Nom de l'acheteur"></div>
+      <div class="form-group"><label>Prix d'offre</label><input type="text" id="om-price" placeholder="ex: 489 000 $"></div>
+      <div class="form-group"><label>Courtier</label>
+        <select id="om-agent"><option value="Karim">Karim</option><option value="Benjamin">Benjamin</option><option value="Afshin">Afshin</option></select></div>
+      ${isAdmin ? `<div class="form-group"><label>Accès agents</label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
+          ${(allUsers.length?allUsers:[{uid:currentUser.uid,name:currentUserProfile?.name||"Karim"}]).map(u=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" value="${u.uid}" class="ops-assign-cb" checked> ${u.name||u.email}</label>`).join("")}
+        </div></div>` : ""}
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeAllModals()">Annuler</button>
+      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="opsSavePurchase()">Enregistrer</button>
+    </div>`;
+  openModal("opsModal");
+};
+
+window.opsSavePurchase = async function(editId) {
+  const addr = document.getElementById("om-addr").value.trim();
+  if (!addr) return;
+  const assignedTo = isAdmin
+    ? [...document.querySelectorAll(".ops-assign-cb:checked")].map(cb=>cb.value)
+    : [currentUser.uid];
+  const data = {
+    addr, buyer: document.getElementById("om-buyer").value.trim(),
+    price: document.getElementById("om-price").value.trim(),
+    agent: document.getElementById("om-agent").value,
+    assignedTo, conditions:[],
+    updatedAt: serverTimestamp()
+  };
+  if (editId) { await updateDoc(doc(db,"ops_purchases",editId),data); }
+  else { data.createdAt=serverTimestamp(); data.createdBy=currentUser.uid; const ref=await addDoc(collection(db,"ops_purchases"),data); opsActivePid=ref.id; }
+  closeAllModals(); opsView="purchases";
+};
+
+window.opsToggleTask = async function(lid, tid) {
+  const l = opsListings.find(x=>x.id===lid);
+  if (!l) return;
+  const chk = {...(l.checklist||{})};
+  chk[tid] = !chk[tid];
+  await updateDoc(doc(db,"ops_listings",lid),{checklist:chk,updatedAt:serverTimestamp()});
+};
+
+window.opsAddCond = async function(type, eid, name, date) {
+  const col = type==="l"?"ops_listings":"ops_purchases";
+  const rec = type==="l"?opsListings.find(x=>x.id===eid):opsPurchases.find(x=>x.id===eid);
+  if (!rec) return;
+  const conds = [...(rec.conditions||[]), {id:"c"+Date.now(), name, date, done:false}];
+  await updateDoc(doc(db,col,eid),{conditions:conds,updatedAt:serverTimestamp()});
+};
+
+window.opsToggleCond = async function(type, eid, cid) {
+  const col = type==="l"?"ops_listings":"ops_purchases";
+  const rec = type==="l"?opsListings.find(x=>x.id===eid):opsPurchases.find(x=>x.id===eid);
+  if (!rec) return;
+  const conds = (rec.conditions||[]).map(c=>c.id===cid?{...c,done:!c.done}:c);
+  await updateDoc(doc(db,col,eid),{conditions:conds,updatedAt:serverTimestamp()});
+};
+
+window.opsUpdateCondDate = async function(type, eid, cid, val) {
+  const col = type==="l"?"ops_listings":"ops_purchases";
+  const rec = type==="l"?opsListings.find(x=>x.id===eid):opsPurchases.find(x=>x.id===eid);
+  if (!rec) return;
+  const conds = (rec.conditions||[]).map(c=>c.id===cid?{...c,date:val}:c);
+  await updateDoc(doc(db,col,eid),{conditions:conds,updatedAt:serverTimestamp()});
+};
+
+window.opsDelCond = async function(type, eid, cid) {
+  const col = type==="l"?"ops_listings":"ops_purchases";
+  const rec = type==="l"?opsListings.find(x=>x.id===eid):opsPurchases.find(x=>x.id===eid);
+  if (!rec) return;
+  const conds = (rec.conditions||[]).filter(c=>c.id!==cid);
+  await updateDoc(doc(db,col,eid),{conditions:conds,updatedAt:serverTimestamp()});
+};
+
+window.opsChgStatus = async function(lid, val) {
+  await updateDoc(doc(db,"ops_listings",lid),{status:val,updatedAt:serverTimestamp()});
+};
+
+window.opsDeleteListing = async function(lid) {
+  if (!confirm("Supprimer cette inscription ?")) return;
+  await deleteDoc(doc(db,"ops_listings",lid));
+  opsActiveLid = opsListings.filter(x=>x.id!==lid)[0]?.id||null;
+  opsView="listings"; renderOps();
+};
+
+window.opsDeletePurchase = async function(pid) {
+  if (!confirm("Supprimer cet achat ?")) return;
+  await deleteDoc(doc(db,"ops_purchases",pid));
+  opsActivePid = opsPurchases.filter(x=>x.id!==pid)[0]?.id||null;
+  opsView="purchases"; renderOps();
+};
+
+window.opsOpenCondModal = function(type, eid) {
+  document.getElementById("opsModalContent").innerHTML = `
+    <div class="modal-header"><div class="modal-title">Ajouter une condition</div><button class="close-x" onclick="closeAllModals()">×</button></div>
+    <div class="mbody-ops">
+      <div class="form-group"><label>Type</label>
+        <select id="ocm-type" onchange="document.getElementById('ocm-cw').style.display=this.value==='Autre'?'block':'none'">
+          <option>Financement</option><option>Inspection</option><option>Revue de documents</option><option value="Autre">Autre</option>
+        </select></div>
+      <div id="ocm-cw" style="display:none;"><div class="form-group"><label>Nom personnalisé</label><input type="text" id="ocm-custom" placeholder="ex: Vente de propriété"></div></div>
+      <div class="form-group"><label>Date limite</label><input type="date" id="ocm-date"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeAllModals()">Annuler</button>
+      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="opsSubmitCond('${type}','${eid}')">Ajouter</button>
+    </div>`;
+  openModal("opsModal");
+};
+
+window.opsSubmitCond = async function(type, eid) {
+  const t = document.getElementById("ocm-type").value;
+  const name = t==="Autre" ? (document.getElementById("ocm-custom").value.trim()||"Autre") : t;
+  const date = document.getElementById("ocm-date").value;
+  await opsAddCond(type, eid, name, date);
+  closeAllModals();
+};
+
+
+// ── Ops render ─────────────────────────────────────────────
+function renderOps() {
+  const el = document.getElementById("opsContent");
+  const ha = document.getElementById("opsHeaderActions");
+  if (!el) return;
+
+  // Build tab bar
+  const tabs = `
+    <div class="ops-tabs">
+      <button class="ops-tab${opsView==="dash"?" active":""}" onclick="opsSetView('dash')">Vue d'ensemble</button>
+      <button class="ops-tab${opsView==="listings"?" active":""}" onclick="opsSetView('listings')">Inscriptions <span class="ops-tab-count">${opsListings.length}</span></button>
+      <button class="ops-tab${opsView==="purchases"?" active":""}" onclick="opsSetView('purchases')">Achats <span class="ops-tab-count">${opsPurchases.length}</span></button>
+    </div>`;
+
+  ha.innerHTML = `
+    <button class="btn-secondary" onclick="opsOpenNewPurchase()">+ Nouvel achat</button>
+    <button class="btn-primary" onclick="opsOpenNewListing()">+ Nouvelle inscription</button>`;
+
+  if (opsView==="dash") { el.innerHTML = tabs + opsRenderDash(); return; }
+  if (opsView==="listings") { el.innerHTML = tabs + opsRenderListings(); return; }
+  if (opsView==="purchases") { el.innerHTML = tabs + opsRenderPurchases(); return; }
+}
+
+window.opsSetView = function(v) { opsView=v; renderOps(); };
+
+function opsRenderDash() {
+  const activeL = opsListings.filter(l=>["offre","ferme"].includes(l.status));
+  let vol = 0;
+  activeL.forEach(l=>vol+=opsParsePx(l.price));
+  opsPurchases.forEach(p=>vol+=opsParsePx(p.price));
+  const comm = vol*0.02;
+  let urgCount = 0;
+  const allC = [];
+  opsListings.forEach(l=>(l.conditions||[]).forEach(c=>{const i=opsCondInfo(c);if(i.urg)urgCount++;allC.push({src:l.addr,type:"l",c,i});}));
+  opsPurchases.forEach(p=>(p.conditions||[]).forEach(c=>{const i=opsCondInfo(c);if(i.urg)urgCount++;allC.push({src:p.addr,type:"p",c,i});}));
+  allC.sort((a,b)=>{if(!a.c.date&&!b.c.date)return 0;if(!a.c.date)return 1;if(!b.c.date)return -1;return new Date(a.c.date)-new Date(b.c.date);});
+
+  return `
+  <div class="ops-kpi-grid">
+    <div class="ops-kpi" style="border-left-color:#0C2B5E"><div class="ops-kpi-l">Dossiers actifs</div><div class="ops-kpi-v">${activeL.length+opsPurchases.length}</div><div class="ops-kpi-s">inscriptions + achats</div></div>
+    <div class="ops-kpi" style="border-left-color:#378ADD"><div class="ops-kpi-l">Volume immobilier</div><div class="ops-kpi-v">${opsFmtPx(vol)}</div><div class="ops-kpi-s">valeur totale des dossiers</div></div>
+    <div class="ops-kpi" style="border-left-color:#1D9E75"><div class="ops-kpi-l">Commission estimée</div><div class="ops-kpi-v">${opsFmtPx(comm)}</div><div class="ops-kpi-s">2% du volume</div></div>
+    <div class="ops-kpi" style="border-left-color:${urgCount>0?"#E24B4A":"#888780"}"><div class="ops-kpi-l">Conditions urgentes</div><div class="ops-kpi-v" style="color:${urgCount>0?"#E24B4A":"var(--text)"}">${urgCount}</div><div class="ops-kpi-s">délai ≤ 3 jours</div></div>
+  </div>
+  <div class="ops-two-col">
+    <div class="ops-card">
+      <div class="ops-card-hd"><span class="ops-card-title">Inscriptions sous contrat</span><span class="ops-pill ops-pill-green">${activeL.length}</span></div>
+      ${activeL.length ? activeL.map(l=>{const px=opsParsePx(l.price);return`<div class="ops-deal-row"><div class="ops-deal-dot" style="background:${l.status==="ferme"?"#1D9E75":"#378ADD"}"></div><div class="ops-deal-info"><div class="ops-deal-addr">${l.addr}</div><div class="ops-deal-meta">${[l.seller,l.agent,OPS_STATUS_LABELS[l.status]].filter(Boolean).join(" · ")}</div></div><div><div class="ops-deal-price">${opsFmtPx(px)}</div><div class="ops-deal-comm">${px?"comm. "+opsFmtPx(px*.02):""}</div></div></div>`;}).join("") : `<div class="ops-empty">Aucune inscription sous contrat</div>`}
+    </div>
+    <div class="ops-card">
+      <div class="ops-card-hd"><span class="ops-card-title">Achats sous conditions</span><span class="ops-pill ops-pill-amber">${opsPurchases.length}</span></div>
+      ${opsPurchases.length ? opsPurchases.map(p=>{const px=opsParsePx(p.price);const pend=(p.conditions||[]).filter(c=>!c.done).length;return`<div class="ops-deal-row"><div class="ops-deal-dot" style="background:#BA7517"></div><div class="ops-deal-info"><div class="ops-deal-addr">${p.addr}</div><div class="ops-deal-meta">${[p.buyer,p.agent,pend+" cond. en attente"].filter(Boolean).join(" · ")}</div></div><div><div class="ops-deal-price">${opsFmtPx(px)}</div><div class="ops-deal-comm">${px?"comm. "+opsFmtPx(px*.02):""}</div></div></div>`;}).join("") : `<div class="ops-empty">Aucun achat en cours</div>`}
+    </div>
+  </div>
+  <div class="ops-section-label">Toutes les conditions</div>
+  <div class="ops-card">${allC.length ? allC.map(({src,type,c,i})=>`<div class="ops-cond-row-dash"><span class="ops-pill ${type==="l"?"ops-pill-green":"ops-pill-amber"}">${type==="l"?"Inscription":"Achat"}</span><span class="ops-cond-src">${src.length>28?src.substring(0,26)+"…":src}</span><span class="ops-cond-nm">${c.name}</span><span class="ops-cond-dt">${opsFmtDate(c.date)}</span><span class="ops-cond-badge ${i.cls}">${i.txt}</span></div>`).join("") : `<div style="padding:2rem;text-align:center;font-size:13px;color:var(--text-3);">Aucune condition enregistrée</div>`}</div>`;
+}
+
+function opsRenderListings() {
+  if (!opsListings.length) return `<div class="empty-state"><div class="empty-icon">◩</div><div class="empty-title">Aucune inscription</div><div class="empty-sub">Cliquez sur "+ Nouvelle inscription"</div></div>`;
+  if (!opsActiveLid || !opsListings.find(x=>x.id===opsActiveLid)) opsActiveLid = opsListings[0].id;
+  const l = opsListings.find(x=>x.id===opsActiveLid);
+  const p = opsLProg(l);
+  const bc = p.pct===100?"#1D9E75":p.pct>50?"#378ADD":"#BA7517";
+
+  const tabs = opsListings.map(li=>{
+    const pr=opsLProg(li); const short=li.addr.length>22?li.addr.substring(0,20)+"…":li.addr;
+    const urg=opsHasUrg(li.conditions);
+    return `<div class="ops-rec-tab${opsActiveLid===li.id?" active":""}" onclick="opsSetLTab('${li.id}')">${short} <span class="ops-tab-pct">${pr.pct}%</span>${urg?'<span class="ops-urgdot"></span>':""}</div>`;
+  }).join("");
+
+  const condsHtml = opsCondsBlock("l", l);
+
+  let phasesHtml = "";
+  OPS_PHASES.forEach(ph=>{
+    const dn = ph.tasks.filter(t=>(l.checklist||{})[t.id]).length;
+    phasesHtml += `<div class="ops-phase">
+      <div class="ops-phdr" onclick="opsTogglePhase('${ph.id}')">
+        <div class="ops-pdot" style="background:${ph.color}"></div>
+        <div class="ops-ptitle">${ph.label}</div>
+        <div class="ops-pmeta">${dn}/${ph.tasks.length}</div>
+        <div class="ops-pchev" id="opschev-${ph.id}">▼</div>
+      </div>
+      <div class="ops-pbody" id="opsbody-${ph.id}" style="display:none;">
+        ${ph.tasks.map(t=>{const on=(l.checklist||{})[t.id];return`<div class="ops-task"><div class="ops-tchk${on?" on":""}" onclick="opsToggleTask('${l.id}','${t.id}')"></div><div class="ops-tcon"><div class="ops-tname${on?" on":""}">${t.name}</div><div class="ops-tmeta"><span class="ops-tag ops-tw">${t.who}</span><span class="ops-tag ops-tt">${t.tool}</span><span class="ops-tag ops-ti">${t.time}</span></div><div class="ops-tdet">${t.det}</div></div></div>`;}).join("")}
+      </div></div>`;
+  });
+
+  return `
+    <div class="ops-rec-tabs">${tabs}</div>
+    <div class="ops-listing-hdr">
+      <div>
+        <div class="ops-addr-big">${l.addr} <span class="ops-status-badge" style="background:${OPS_STATUS_COLORS[l.status]}20;color:${OPS_STATUS_COLORS[l.status]};border:1px solid ${OPS_STATUS_COLORS[l.status]}40">${OPS_STATUS_LABELS[l.status]}</span></div>
+        <div class="ops-listing-sub">${[l.seller,l.price,l.agent].filter(Boolean).join(" · ")}</div>
+      </div>
+      <div class="ops-lactions">
+        <select class="ops-status-sel" onchange="opsChgStatus('${l.id}',this.value)">
+          <option value="active"${l.status==="active"?" selected":""}>Actif</option>
+          <option value="offre"${l.status==="offre"?" selected":""}>Offre reçue</option>
+          <option value="ferme"${l.status==="ferme"?" selected":""}>Vente ferme</option>
+          <option value="vendu"${l.status==="vendu"?" selected":""}>Vendu</option>
+        </select>
+        ${isAdmin?`<button class="btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="opsDeleteListing('${l.id}')">Supprimer</button>`:""}
+      </div>
+    </div>
+    <div class="ops-stats-row">
+      <div class="ops-stat"><div class="ops-stat-l">Total</div><div class="ops-stat-v">${p.tot}</div></div>
+      <div class="ops-stat"><div class="ops-stat-l">Complétés</div><div class="ops-stat-v">${p.dn}</div></div>
+      <div class="ops-stat"><div class="ops-stat-l">Restants</div><div class="ops-stat-v">${p.tot-p.dn}</div></div>
+      <div class="ops-stat"><div class="ops-stat-l">Progrès</div><div class="ops-stat-v">${p.pct}%</div></div>
+    </div>
+    <div class="ops-pbar-wrap"><div class="ops-pbar-fill" style="width:${p.pct}%;background:${bc}"></div></div>
+    ${condsHtml}
+    ${phasesHtml}`;
+}
+
+function opsRenderPurchases() {
+  if (!opsPurchases.length) return `<div class="empty-state"><div class="empty-icon">◩</div><div class="empty-title">Aucun achat</div><div class="empty-sub">Cliquez sur "+ Nouvel achat"</div></div>`;
+  if (!opsActivePid || !opsPurchases.find(x=>x.id===opsActivePid)) opsActivePid = opsPurchases[0].id;
+  const p = opsPurchases.find(x=>x.id===opsActivePid);
+  const pr = opsPProg(p);
+  const r=32; const circ=2*Math.PI*r; const off=circ-(pr.pct/100)*circ;
+  const rc = pr.pct===100?"#1D9E75":pr.pct>50?"#378ADD":"#BA7517";
+
+  const tabs = opsPurchases.map(pu=>{
+    const short=pu.addr.length>22?pu.addr.substring(0,20)+"…":pu.addr;
+    const urg=opsHasUrg(pu.conditions);
+    return `<div class="ops-rec-tab${opsActivePid===pu.id?" active":""}" onclick="opsSetPTab('${pu.id}')">${short}${urg?'<span class="ops-urgdot"></span>':""}</div>`;
+  }).join("");
+
+  return `
+    <div class="ops-rec-tabs">${tabs}</div>
+    <div class="ops-listing-hdr">
+      <div style="display:flex;align-items:center;gap:16px;">
+        <div class="ops-ring-wrap">
+          <svg width="70" height="70" viewBox="0 0 70 70"><circle cx="35" cy="35" r="${r}" fill="none" stroke="#eee" stroke-width="5"/><circle cx="35" cy="35" r="${r}" fill="none" stroke="${rc}" stroke-width="5" stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" stroke-linecap="round" transform="rotate(-90 35 35)"/></svg>
+          <div class="ops-ring-pct">${pr.pct}%</div>
+        </div>
+        <div>
+          <div class="ops-addr-big">${p.addr}</div>
+          <div class="ops-listing-sub">${[p.buyer,p.price,p.agent].filter(Boolean).join(" · ")}</div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:4px;">${pr.dn} condition${pr.dn!==1?"s":""} levée${pr.dn!==1?"s":""} sur ${pr.tot}</div>
+        </div>
+      </div>
+      ${isAdmin?`<button class="btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="opsDeletePurchase('${p.id}')">Supprimer</button>`:""}
+    </div>
+    ${opsCondsBlock("p", p)}`;
+}
+
+function opsCondsBlock(type, rec) {
+  const conds = rec.conditions||[];
+  const urg = conds.filter(c=>!c.done&&c.date&&opsDaysUntil(c.date)<=3&&opsDaysUntil(c.date)>=0);
+  const exp = conds.filter(c=>!c.done&&c.date&&opsDaysUntil(c.date)<0);
+  let alerts="";
+  if (urg.length) alerts+=`<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:8px;background:#FCEBEB;border:1px solid #F09595;margin-bottom:8px;"><div style="width:8px;height:8px;border-radius:50%;background:#E24B4A;flex-shrink:0;"></div><div style="font-size:13px;font-weight:500;color:#791F1F;">Urgent : ${urg.map(c=>`${c.name} (${opsDaysUntil(c.date)===0?"aujourd'hui":opsDaysUntil(c.date)+"j"})`).join(", ")}</div></div>`;
+  if (exp.length) alerts+=`<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:8px;background:#FAEEDA;border:1px solid #FAC775;margin-bottom:8px;"><div style="width:8px;height:8px;border-radius:50%;background:#BA7517;flex-shrink:0;"></div><div style="font-size:13px;font-weight:500;color:#633806;">Expirée(s) : ${exp.map(c=>c.name).join(", ")}</div></div>`;
+  const rows = conds.length ? conds.map(c=>{
+    const i=opsCondInfo(c);
+    return `<div class="ops-crow">
+      <div class="ops-cchk${c.done?" on":""}" onclick="opsToggleCond('${type}','${rec.id}','${c.id}')"></div>
+      <div class="ops-cname"${c.done?' style="text-decoration:line-through;color:var(--text-3)"':''}>${c.name}</div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+        <label style="font-size:12px;color:var(--text-2);">Date limite</label>
+        <input type="date" value="${c.date||""}" onchange="opsUpdateCondDate('${type}','${rec.id}','${c.id}',this.value)" style="font-size:12px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);width:138px;">
+      </div>
+      <span class="ops-cond-badge ${i.cls}">${i.txt}</span>
+      <button onclick="opsDelCond('${type}','${rec.id}','${c.id}')" style="font-size:11px;color:var(--red);padding:2px 6px;border-radius:6px;border:1px solid #F09595;background:none;cursor:pointer;">×</button>
+    </div>`;
+  }).join("") : `<div style="padding:1rem;text-align:center;font-size:13px;color:var(--text-3);">Aucune condition — cliquez sur "+ Condition"</div>`;
+  return `<div class="ops-conds-card">
+    <div class="ops-conds-hd"><span>Conditions de l'offre</span><button class="btn-secondary" style="font-size:12px;padding:4px 10px;" onclick="opsOpenCondModal('${type}','${rec.id}')">+ Condition</button></div>
+    <div style="padding:${conds.length||urg.length||exp.length?"0":"0"}">${alerts}${rows}</div>
+  </div>`;
+}
+
+window.opsSetLTab = function(lid) { opsActiveLid=lid; renderOps(); };
+window.opsSetPTab = function(pid) { opsActivePid=pid; renderOps(); };
+window.opsTogglePhase = function(pid) {
+  const body = document.getElementById("opsbody-"+pid);
+  const chev = document.getElementById("opschev-"+pid);
+  if (!body) return;
+  const open = body.style.display!=="none";
+  body.style.display = open?"none":"block";
+  if (chev) chev.style.transform = open?"":"rotate(180deg)";
+};
+
+
+// ── Prospects (unchanged from original) ────────────────────
 function subscribeToProspects() {
-  const q = query(collection(db, "prospects"), orderBy("createdAt", "desc"));
-  unsubscribeProspects = onSnapshot(q, (snap) => {
-    allProspects = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderProspects();
-    updateProspectCount();
+  const q = query(collection(db,"prospects"), orderBy("createdAt","desc"));
+  unsubscribeProspects = onSnapshot(q, snap => {
+    allProspects = snap.docs.map(d=>({id:d.id,...d.data()}));
+    renderProspects(); updateProspectCount();
     if (isAdmin) renderDashboard();
     const perfView = document.getElementById("view-performance");
-    if (perfView && perfView.classList.contains("active")) renderPerformanceView();
+    if (perfView&&perfView.classList.contains("active")) renderPerformanceView();
   });
 }
-
-// ── Today's Targets ────────────────────────────────────────
 function subscribeToTargets() {
   const todayKey = getTodayKey();
-  const targetDoc = doc(db, "targets", `${currentUser.uid}_${todayKey}`);
-  unsubscribeTargets = onSnapshot(targetDoc, (snap) => {
-    if (snap.exists()) {
-      const data = snap.data();
-      if (data.date === todayKey) todaysTargets = data.prospectIds || [];
-      else todaysTargets = [];
-    } else {
-      todaysTargets = [];
-    }
-    updateTargetNav();
-    renderProspects();
-    const view = document.getElementById("view-targets");
-    if (view && view.classList.contains("active")) renderTargetsView();
+  const targetDoc = doc(db,"targets",`${currentUser.uid}_${todayKey}`);
+  unsubscribeTargets = onSnapshot(targetDoc, snap => {
+    if (snap.exists()) { const data=snap.data(); if (data.date===todayKey) todaysTargets=data.prospectIds||[]; else todaysTargets=[]; }
+    else todaysTargets=[];
+    updateTargetNav(); renderProspects();
+    const view=document.getElementById("view-targets");
+    if (view&&view.classList.contains("active")) renderTargetsView();
   });
 }
-
 function updateTargetNav() {
-  const n = todaysTargets.length;
-  const badge = n > 0 ? ` (${n})` : "";
-  const navEl = document.getElementById("targetsNavLabel");
-  if (navEl) navEl.textContent = `Today's Targets${badge}`;
-  const mobileEl = document.getElementById("targetsNavLabelMobile");
-  if (mobileEl) mobileEl.textContent = `Today's Targets${badge}`;
+  const n=todaysTargets.length; const badge=n>0?` (${n})`:"";
+  const navEl=document.getElementById("targetsNavLabel"); if (navEl) navEl.textContent=`Today's Targets${badge}`;
+  const mEl=document.getElementById("targetsNavLabelMobile"); if (mEl) mEl.textContent=`Today's Targets${badge}`;
 }
-
 window.toggleTarget = async function(prospectId) {
-  const todayKey = getTodayKey();
-  const targetDocRef = doc(db, "targets", `${currentUser.uid}_${todayKey}`);
-  const newTargets = todaysTargets.includes(prospectId)
-    ? todaysTargets.filter(id => id !== prospectId)
-    : [...todaysTargets, prospectId];
-  await setDoc(targetDocRef, { prospectIds: newTargets, date: todayKey, agentId: currentUser.uid });
+  const todayKey=getTodayKey(); const ref=doc(db,"targets",`${currentUser.uid}_${todayKey}`);
+  const newT=todaysTargets.includes(prospectId)?todaysTargets.filter(id=>id!==prospectId):[...todaysTargets,prospectId];
+  await setDoc(ref,{prospectIds:newT,date:todayKey,agentId:currentUser.uid});
 };
-
 window.removeTarget = async function(prospectId) {
-  const todayKey = getTodayKey();
-  const targetDocRef = doc(db, "targets", `${currentUser.uid}_${todayKey}`);
-  const newTargets = todaysTargets.filter(id => id !== prospectId);
-  await setDoc(targetDocRef, { prospectIds: newTargets, date: todayKey, agentId: currentUser.uid });
+  const todayKey=getTodayKey(); const ref=doc(db,"targets",`${currentUser.uid}_${todayKey}`);
+  await setDoc(ref,{prospectIds:todaysTargets.filter(id=>id!==prospectId),date:todayKey,agentId:currentUser.uid});
 };
-
 window.clearAllTargets = async function() {
   if (!confirm("Clear all targets for today?")) return;
-  const todayKey = getTodayKey();
-  const targetDocRef = doc(db, "targets", `${currentUser.uid}_${todayKey}`);
-  await setDoc(targetDocRef, { prospectIds: [], date: todayKey, agentId: currentUser.uid });
+  const todayKey=getTodayKey(); await setDoc(doc(db,"targets",`${currentUser.uid}_${todayKey}`),{prospectIds:[],date:todayKey,agentId:currentUser.uid});
 };
-
 function renderTargetsView() {
-  const el = document.getElementById("targetsContent");
-  if (!el) return;
-  const targets = allProspects.filter(p => todaysTargets.includes(p.id));
-  if (targets.length === 0) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">🎯</div>
-      <div class="empty-title">No targets for today</div>
-      <div class="empty-sub">Go to Prospects and click the 🎯 button on any card to add it to today's targets.</div>
-    </div>`;
-    return;
-  }
-  const addresses = targets.map(p => {
-    const o = p.owners?.[0];
-    if (o && o.street) return `${o.street}, ${o.city}`;
-    return "";
-  }).filter(Boolean);
-  const mapsUrl = addresses.length > 1
-    ? `https://www.google.com/maps/dir/${addresses.map(a => encodeURIComponent(a)).join("/")}`
-    : addresses.length === 1 ? `https://www.google.com/maps/search/${encodeURIComponent(addresses[0])}` : "";
-
-  const stopsList = targets.map((p, i) => {
-    const o = p.owners?.[0];
-    const addr = o ? `${o.street}, ${o.city} ${o.postal}` : "—";
-    const propType = detectPropertyType(p.listingAddress);
-    const mailings = (p.mail || []).filter(Boolean).length;
-    const evalBooked = (p.visits || []).some(v => v.evalBooked === "yes");
-    const contacted = (p.visits || []).some(v => v.contact === "yes");
-    const statusColor = evalBooked ? "#2D6A4F" : contacted ? "#1D4ED8" : mailings > 0 ? "#92400E" : "#6B7280";
-    const statusLabel = evalBooked ? "Eval booked" : contacted ? "Contacted" : mailings > 0 ? `${mailings} mailings` : "Not contacted";
-    const mapsAddr = o && o.street ? `${o.street}, ${o.city}` : "";
+  const el=document.getElementById("targetsContent"); if (!el) return;
+  const targets=allProspects.filter(p=>todaysTargets.includes(p.id));
+  if (!targets.length) { el.innerHTML=`<div class="empty-state"><div class="empty-icon">🎯</div><div class="empty-title">No targets for today</div><div class="empty-sub">Go to Prospects and click the 🎯 button on any card.</div></div>`; return; }
+  const addresses=targets.map(p=>{const o=p.owners?.[0];if(o&&o.street)return`${o.street}, ${o.city}`;return"";}).filter(Boolean);
+  const mapsUrl=addresses.length>1?`https://www.google.com/maps/dir/${addresses.map(a=>encodeURIComponent(a)).join("/")}`:addresses.length===1?`https://www.google.com/maps/search/${encodeURIComponent(addresses[0])}`:"";
+  const stopsList=targets.map((p,i)=>{
+    const o=p.owners?.[0]; const addr=o?`${o.street}, ${o.city} ${o.postal}`:"—";
+    const propType=detectPropertyType(p.listingAddress); const mailings=(p.mail||[]).filter(Boolean).length;
+    const evalBooked=(p.visits||[]).some(v=>v.evalBooked==="yes"); const contacted=(p.visits||[]).some(v=>v.contact==="yes");
+    const statusColor=evalBooked?"#2D6A4F":contacted?"#1D4ED8":mailings>0?"#92400E":"#6B7280";
+    const statusLabel=evalBooked?"Eval booked":contacted?"Contacted":mailings>0?`${mailings} mailings`:"Not contacted";
+    const mapsAddr=o&&o.street?`${o.street}, ${o.city}`:"";
     return `<div style="display:flex;gap:14px;align-items:flex-start;padding:14px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);margin-bottom:10px;">
       <div style="width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;flex-shrink:0;">${i+1}</div>
       <div style="flex:1;min-width:0;">
@@ -342,1122 +706,214 @@ function renderTargetsView() {
         </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
-        ${mapsAddr ? `<a href="https://www.google.com/maps/search/${encodeURIComponent(mapsAddr)}" target="_blank" style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--accent-light);color:var(--accent);text-decoration:none;white-space:nowrap;">📍 Maps</a>` : ""}
+        ${mapsAddr?`<a href="https://www.google.com/maps/search/${encodeURIComponent(mapsAddr)}" target="_blank" style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--accent-light);color:var(--accent);text-decoration:none;white-space:nowrap;">📍 Maps</a>`:""}
         <button onclick="removeTarget('${p.id}')" style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--red-bg);color:var(--red);border:none;cursor:pointer;font-family:var(--font);white-space:nowrap;">✕ Remove</button>
       </div>
     </div>`;
   }).join("");
-
-  el.innerHTML = `
-    <div style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-      <div style="flex:1;font-size:13px;color:var(--text-2);">${targets.length} stop${targets.length !== 1 ? "s" : ""} · ${new Date().toLocaleDateString("en-CA", {weekday:"long",month:"long",day:"numeric"})}</div>
-      ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border-radius:var(--radius);background:var(--accent);color:#fff;font-size:13px;font-weight:500;text-decoration:none;font-family:var(--font);">🗺 Open full route in Google Maps</a>` : ""}
-      <button onclick="clearAllTargets()" style="padding:9px 14px;border-radius:var(--radius);background:var(--red-bg);color:var(--red);border:none;font-size:13px;font-family:var(--font);cursor:pointer;">Clear all</button>
-    </div>
-    <div style="background:var(--accent-light);border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;font-size:12px;color:var(--accent);line-height:1.6;">
-      🎯 Stops are listed in the order you added them. Google Maps will optimize the route automatically.
-    </div>
-    ${stopsList}`;
+  el.innerHTML=`<div style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;"><div style="flex:1;font-size:13px;color:var(--text-2);">${targets.length} stop${targets.length!==1?"s":""} · ${new Date().toLocaleDateString("en-CA",{weekday:"long",month:"long",day:"numeric"})}</div>${mapsUrl?`<a href="${mapsUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border-radius:var(--radius);background:var(--accent);color:#fff;font-size:13px;font-weight:500;text-decoration:none;font-family:var(--font);">🗺 Open route in Google Maps</a>`:""}<button onclick="clearAllTargets()" style="padding:9px 14px;border-radius:var(--radius);background:var(--red-bg);color:var(--red);border:none;font-size:13px;font-family:var(--font);cursor:pointer;">Clear all</button></div><div style="background:var(--accent-light);border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;font-size:12px;color:var(--accent);line-height:1.6;">🎯 Stops are listed in the order you added them. Google Maps will optimize the route automatically.</div>${stopsList}`;
 }
-
-// ── Performance view ───────────────────────────────────────
 function renderPerformanceView() {
-  const el = document.getElementById("performanceContent");
-  if (!el) return;
-
-  if (isAdmin) {
-    renderAdminPerformance(el);
-  } else {
-    renderAgentPerformance(el, currentUser.uid, currentUserProfile?.name || currentUser.email);
-  }
+  const el=document.getElementById("performanceContent"); if (!el) return;
+  if (isAdmin) renderAdminPerformance(el); else renderAgentPerformance(el,currentUser.uid,currentUserProfile?.name||currentUser.email);
 }
-
-function renderTierMeter(doors, structure) {
-  const tiers = structure.tiers;
-  const maxDoors = tiers[tiers.length - 1].doors;
-  const displayMax = Math.max(doors, maxDoors);
-  const pct = Math.min((doors / maxDoors) * 100, 100);
-
-  const tier1 = tiers[0];
-  const tier2 = tiers[1];
-  const tier1Pct = (tier1.doors / maxDoors) * 100;
-  const tier2Pct = 100;
-
-  const currentTier = doors >= tier2.doors ? 2 : doors >= tier1.doors ? 1 : 0;
-  const tierColors = ["#6B7280", "#F59E0B", "#10B981"];
-  const tierLabels = ["No tier yet", `${tier1.label} unlocked 🎉`, `${tier2.label} unlocked 🏆`];
-
-  const nextTier = currentTier < 2 ? tiers[currentTier] : null;
-  const doorsLeft = nextTier ? nextTier.doors - doors : 0;
-
-  return `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:16px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-        <div>
-          <div style="font-size:22px;font-weight:700;color:var(--text);">${doors} doors</div>
-          <div style="font-size:13px;color:${tierColors[currentTier]};font-weight:500;margin-top:2px;">${tierLabels[currentTier]}</div>
-        </div>
-        ${nextTier ? `<div style="text-align:right;"><div style="font-size:12px;color:var(--text-3);">Next tier in</div><div style="font-size:20px;font-weight:700;color:var(--accent);">${doorsLeft} doors</div></div>` : `<div style="font-size:28px;">🏆</div>`}
-      </div>
-
-      <!-- Progress bar -->
-      <div style="position:relative;height:20px;background:var(--bg);border-radius:99px;overflow:visible;margin-bottom:24px;">
-        <!-- Fill -->
-        <div style="position:absolute;left:0;top:0;height:100%;width:${pct}%;background:${currentTier === 2 ? '#10B981' : currentTier === 1 ? '#F59E0B' : 'var(--accent)'};border-radius:99px;transition:width 0.6s ease;"></div>
-        <!-- Tier 1 checkpoint -->
-        <div style="position:absolute;left:${tier1Pct}%;top:50%;transform:translate(-50%,-50%);z-index:2;">
-          <div style="width:20px;height:20px;border-radius:50%;background:${doors >= tier1.doors ? '#F59E0B' : '#fff'};border:2px solid ${doors >= tier1.doors ? '#F59E0B' : '#D1D5DB'};display:flex;align-items:center;justify-content:center;font-size:10px;">${doors >= tier1.doors ? '✓' : ''}</div>
-        </div>
-        <!-- Tier 2 checkpoint -->
-        <div style="position:absolute;left:calc(100% - 10px);top:50%;transform:translate(-50%,-50%);z-index:2;">
-          <div style="width:20px;height:20px;border-radius:50%;background:${doors >= tier2.doors ? '#10B981' : '#fff'};border:2px solid ${doors >= tier2.doors ? '#10B981' : '#D1D5DB'};display:flex;align-items:center;justify-content:center;font-size:10px;">${doors >= tier2.doors ? '✓' : ''}</div>
-        </div>
-      </div>
-
-      <!-- Tier labels below bar -->
-      <div style="display:flex;justify-content:space-between;margin-bottom:20px;">
-        <div style="font-size:11px;color:var(--text-3);">0</div>
-        <div style="font-size:11px;color:${doors >= tier1.doors ? '#F59E0B' : 'var(--text-3)'};font-weight:500;text-align:center;">
-          ${tier1.label}<br>${tier1.doors} doors
-        </div>
-        <div style="font-size:11px;color:${doors >= tier2.doors ? '#10B981' : 'var(--text-3)'};font-weight:500;text-align:right;">
-          ${tier2.label}<br>${tier2.doors} doors
-        </div>
-      </div>
-
-      <!-- Commission cards -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div style="padding:12px;border-radius:var(--radius);border:2px solid ${currentTier >= 1 ? '#F59E0B' : 'var(--border)'};background:${currentTier >= 1 ? '#FFFBEB' : 'var(--bg)'};opacity:${currentTier >= 1 ? '1' : '0.5'};">
-          <div style="font-size:11px;font-weight:600;color:${currentTier >= 1 ? '#92400E' : 'var(--text-3)'};margin-bottom:6px;">🥈 ${tier1.label} · ${tier1.doors} doors</div>
-          <div style="font-size:13px;color:var(--text-2);">Sale: <strong style="color:${currentTier >= 1 ? '#92400E' : 'var(--text-3)'};">${tier1.sale}%</strong></div>
-          <div style="font-size:13px;color:var(--text-2);">Purchase: <strong style="color:${currentTier >= 1 ? '#92400E' : 'var(--text-3)'};">${tier1.purchase}%</strong></div>
-        </div>
-        <div style="padding:12px;border-radius:var(--radius);border:2px solid ${currentTier >= 2 ? '#10B981' : 'var(--border)'};background:${currentTier >= 2 ? '#ECFDF5' : 'var(--bg)'};opacity:${currentTier >= 2 ? '1' : '0.5'};">
-          <div style="font-size:11px;font-weight:600;color:${currentTier >= 2 ? '#065F46' : 'var(--text-3)'};margin-bottom:6px;">🥇 ${tier2.label} · ${tier2.doors} doors</div>
-          <div style="font-size:13px;color:var(--text-2);">Sale: <strong style="color:${currentTier >= 2 ? '#065F46' : 'var(--text-3)'};">${tier2.sale}%</strong></div>
-          <div style="font-size:13px;color:var(--text-2);">Purchase: <strong style="color:${currentTier >= 2 ? '#065F46' : 'var(--text-3)'};">${tier2.purchase}%</strong></div>
-        </div>
-      </div>
-    </div>`;
-}
-
-function renderAgentPerformance(el, agentId, agentName) {
-  const structure = getBonusStructure(agentName);
-  const currentMonthKey = getMonthKey();
-  const { doors, evals } = getVisitsForAgent(agentId, currentMonthKey);
-  const history = getMonthlyHistory(agentId);
-
-  const monthName = new Date().toLocaleDateString("en-CA", { month: "long", year: "numeric" });
-
-  const historyHtml = history.length === 0 ? "" : `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;">
-      <div class="section-title" style="margin-bottom:12px;">Monthly history</div>
-      ${history.map(([mk, stats]) => {
-        const struct = getBonusStructure(agentName);
-        const tier = stats.doors >= struct.tiers[1].doors ? 2 : stats.doors >= struct.tiers[0].doors ? 1 : 0;
-        const tierBadge = tier === 2 ? `<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#ECFDF5;color:#065F46;font-weight:500;">Tier 2 🏆</span>`
-          : tier === 1 ? `<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#FFFBEB;color:#92400E;font-weight:500;">Tier 1 🥈</span>`
-          : `<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg);color:var(--text-3);">No tier</span>`;
-        const d = new Date(mk + "-01");
-        const label = d.toLocaleDateString("en-CA", { month: "long", year: "numeric" });
-        return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
-          <div style="flex:1;font-size:13px;font-weight:500;">${label}</div>
-          <div style="font-size:12px;color:var(--text-2);">${stats.doors} doors · ${stats.evals} evals</div>
-          ${tierBadge}
-        </div>`;
-      }).join("")}
-    </div>`;
-
-  el.innerHTML = `
-    <div style="margin-bottom:16px;">
-      <div style="font-size:13px;color:var(--text-2);">${monthName} · ${evals} evaluation${evals !== 1 ? "s" : ""} booked</div>
+function renderTierMeter(doors,structure) {
+  const tiers=structure.tiers; const maxDoors=tiers[tiers.length-1].doors; const pct=Math.min((doors/maxDoors)*100,100);
+  const tier1=tiers[0]; const tier2=tiers[1]; const tier1Pct=(tier1.doors/maxDoors)*100;
+  const currentTier=doors>=tier2.doors?2:doors>=tier1.doors?1:0;
+  const tierColors=["#6B7280","#F59E0B","#10B981"]; const tierLabels=["No tier yet",`${tier1.label} unlocked 🎉`,`${tier2.label} unlocked 🏆`];
+  const nextTier=currentTier<2?tiers[currentTier]:null; const doorsLeft=nextTier?nextTier.doors-doors:0;
+  return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div><div style="font-size:22px;font-weight:700;color:var(--text);">${doors} doors</div><div style="font-size:13px;color:${tierColors[currentTier]};font-weight:500;margin-top:2px;">${tierLabels[currentTier]}</div></div>
+      ${nextTier?`<div style="text-align:right;"><div style="font-size:12px;color:var(--text-3);">Next tier in</div><div style="font-size:20px;font-weight:700;color:var(--accent);">${doorsLeft} doors</div></div>`:`<div style="font-size:28px;">🏆</div>`}
     </div>
-    ${renderTierMeter(doors, structure)}
-    ${historyHtml}`;
+    <div style="position:relative;height:20px;background:var(--bg);border-radius:99px;overflow:visible;margin-bottom:24px;">
+      <div style="position:absolute;left:0;top:0;height:100%;width:${pct}%;background:${currentTier===2?'#10B981':currentTier===1?'#F59E0B':'var(--accent)'};border-radius:99px;transition:width 0.6s ease;"></div>
+      <div style="position:absolute;left:${tier1Pct}%;top:50%;transform:translate(-50%,-50%);z-index:2;"><div style="width:20px;height:20px;border-radius:50%;background:${doors>=tier1.doors?'#F59E0B':'#fff'};border:2px solid ${doors>=tier1.doors?'#F59E0B':'#D1D5DB'};display:flex;align-items:center;justify-content:center;font-size:10px;">${doors>=tier1.doors?'✓':''}</div></div>
+      <div style="position:absolute;left:calc(100% - 10px);top:50%;transform:translate(-50%,-50%);z-index:2;"><div style="width:20px;height:20px;border-radius:50%;background:${doors>=tier2.doors?'#10B981':'#fff'};border:2px solid ${doors>=tier2.doors?'#10B981':'#D1D5DB'};display:flex;align-items:center;justify-content:center;font-size:10px;">${doors>=tier2.doors?'✓':''}</div></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-bottom:20px;">
+      <div style="font-size:11px;color:var(--text-3);">0</div>
+      <div style="font-size:11px;color:${doors>=tier1.doors?'#F59E0B':'var(--text-3)'};font-weight:500;text-align:center;">${tier1.label}<br>${tier1.doors} doors</div>
+      <div style="font-size:11px;color:${doors>=tier2.doors?'#10B981':'var(--text-3)'};font-weight:500;text-align:right;">${tier2.label}<br>${tier2.doors} doors</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div style="padding:12px;border-radius:var(--radius);border:2px solid ${currentTier>=1?'#F59E0B':'var(--border)'};background:${currentTier>=1?'#FFFBEB':'var(--bg)'};opacity:${currentTier>=1?'1':'0.5'};"><div style="font-size:11px;font-weight:600;color:${currentTier>=1?'#92400E':'var(--text-3)'};margin-bottom:6px;">🥈 ${tier1.label} · ${tier1.doors} doors</div><div style="font-size:13px;color:var(--text-2);">Sale: <strong style="color:${currentTier>=1?'#92400E':'var(--text-3)'};">${tier1.sale}%</strong></div><div style="font-size:13px;color:var(--text-2);">Purchase: <strong style="color:${currentTier>=1?'#92400E':'var(--text-3)'};">${tier1.purchase}%</strong></div></div>
+      <div style="padding:12px;border-radius:var(--radius);border:2px solid ${currentTier>=2?'#10B981':'var(--border)'};background:${currentTier>=2?'#ECFDF5':'var(--bg)'};opacity:${currentTier>=2?'1':'0.5'};"><div style="font-size:11px;font-weight:600;color:${currentTier>=2?'#065F46':'var(--text-3)'};margin-bottom:6px;">🥇 ${tier2.label} · ${tier2.doors} doors</div><div style="font-size:13px;color:var(--text-2);">Sale: <strong style="color:${currentTier>=2?'#065F46':'var(--text-3)'};">${tier2.sale}%</strong></div><div style="font-size:13px;color:var(--text-2);">Purchase: <strong style="color:${currentTier>=2?'#065F46':'var(--text-3)'};">${tier2.purchase}%</strong></div></div>
+    </div></div>`;
 }
-
+function renderAgentPerformance(el,agentId,agentName) {
+  const structure=getBonusStructure(agentName); const currentMonthKey=getMonthKey();
+  const {doors,evals}=getVisitsForAgent(agentId,currentMonthKey); const history=getMonthlyHistory(agentId);
+  const monthName=new Date().toLocaleDateString("en-CA",{month:"long",year:"numeric"});
+  const historyHtml=history.length===0?"":history.map(([mk,stats])=>{
+    const struct=getBonusStructure(agentName); const tier=stats.doors>=struct.tiers[1].doors?2:stats.doors>=struct.tiers[0].doors?1:0;
+    const tierBadge=tier===2?`<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#ECFDF5;color:#065F46;font-weight:500;">Tier 2 🏆</span>`:tier===1?`<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#FFFBEB;color:#92400E;font-weight:500;">Tier 1 🥈</span>`:`<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg);color:var(--text-3);">No tier</span>`;
+    const d=new Date(mk+"-01"); const label=d.toLocaleDateString("en-CA",{month:"long",year:"numeric"});
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);"><div style="flex:1;font-size:13px;font-weight:500;">${label}</div><div style="font-size:12px;color:var(--text-2);">${stats.doors} doors · ${stats.evals} evals</div>${tierBadge}</div>`;
+  }).join("");
+  el.innerHTML=`<div style="margin-bottom:16px;"><div style="font-size:13px;color:var(--text-2);">${monthName} · ${evals} evaluation${evals!==1?"s":""} booked</div></div>${renderTierMeter(doors,structure)}${history.length?`<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;"><div class="section-title" style="margin-bottom:12px;">Monthly history</div>${historyHtml}</div>`:""}`;
+}
 function renderAdminPerformance(el) {
-  if (allUsers.length === 0) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">◎</div><div class="empty-title">No agents yet</div></div>`;
-    return;
-  }
-  const currentMonthKey = getMonthKey();
-  const monthName = new Date().toLocaleDateString("en-CA", { month: "long", year: "numeric" });
-
-  const agentsHtml = allUsers.map(u => {
-    const { doors, evals } = getVisitsForAgent(u.uid, currentMonthKey);
-    const structure = getBonusStructure(u.name);
-    const tier = doors >= structure.tiers[1].doors ? 2 : doors >= structure.tiers[0].doors ? 1 : 0;
-    const tierBadge = tier === 2 ? `<span style="font-size:11px;padding:2px 8px;border-radius:4px;background:#ECFDF5;color:#065F46;font-weight:500;">Tier 2 🏆</span>`
-      : tier === 1 ? `<span style="font-size:11px;padding:2px 8px;border-radius:4px;background:#FFFBEB;color:#92400E;font-weight:500;">Tier 1 🥈</span>`
-      : `<span style="font-size:11px;padding:2px 8px;border-radius:4px;background:var(--bg);color:var(--text-3);">No tier</span>`;
-    const maxDoors = structure.tiers[1].doors;
-    const pct = Math.min((doors / maxDoors) * 100, 100);
-    const tier1Pct = (structure.tiers[0].doors / maxDoors) * 100;
-    return `
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;margin-bottom:12px;">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-          <div class="agent-avatar">${(u.name||"?").slice(0,2).toUpperCase()}</div>
-          <div style="flex:1;">
-            <div style="font-size:14px;font-weight:600;">${u.name || u.email}</div>
-            <div style="font-size:12px;color:var(--text-3);">${doors} doors · ${evals} evals this month</div>
-          </div>
-          ${tierBadge}
-        </div>
-        <div style="position:relative;height:14px;background:var(--bg);border-radius:99px;overflow:visible;margin-bottom:8px;">
-          <div style="position:absolute;left:0;top:0;height:100%;width:${pct}%;background:${tier === 2 ? '#10B981' : tier === 1 ? '#F59E0B' : 'var(--accent)'};border-radius:99px;transition:width 0.6s;"></div>
-          <div style="position:absolute;left:${tier1Pct}%;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:${doors >= structure.tiers[0].doors ? '#F59E0B' : '#fff'};border:2px solid ${doors >= structure.tiers[0].doors ? '#F59E0B' : '#D1D5DB'};"></div>
-          <div style="position:absolute;left:calc(100% - 7px);top:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:${doors >= structure.tiers[1].doors ? '#10B981' : '#fff'};border:2px solid ${doors >= structure.tiers[1].doors ? '#10B981' : '#D1D5DB'};"></div>
-        </div>
-        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);">
-          <span>0</span>
-          <span>${structure.tiers[0].doors} (T1)</span>
-          <span>${structure.tiers[1].doors} (T2)</span>
-        </div>
-      </div>`;
+  if (!allUsers.length) { el.innerHTML=`<div class="empty-state"><div class="empty-icon">◎</div><div class="empty-title">No agents yet</div></div>`; return; }
+  const currentMonthKey=getMonthKey(); const monthName=new Date().toLocaleDateString("en-CA",{month:"long",year:"numeric"});
+  const agentsHtml=allUsers.map(u=>{
+    const {doors,evals}=getVisitsForAgent(u.uid,currentMonthKey); const structure=getBonusStructure(u.name);
+    const tier=doors>=structure.tiers[1].doors?2:doors>=structure.tiers[0].doors?1:0;
+    const tierBadge=tier===2?`<span style="font-size:11px;padding:2px 8px;border-radius:4px;background:#ECFDF5;color:#065F46;font-weight:500;">Tier 2 🏆</span>`:tier===1?`<span style="font-size:11px;padding:2px 8px;border-radius:4px;background:#FFFBEB;color:#92400E;font-weight:500;">Tier 1 🥈</span>`:`<span style="font-size:11px;padding:2px 8px;border-radius:4px;background:var(--bg);color:var(--text-3);">No tier</span>`;
+    const maxDoors=structure.tiers[1].doors; const pct=Math.min((doors/maxDoors)*100,100); const tier1Pct=(structure.tiers[0].doors/maxDoors)*100;
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;margin-bottom:12px;"><div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><div class="agent-avatar">${(u.name||"?").slice(0,2).toUpperCase()}</div><div style="flex:1;"><div style="font-size:14px;font-weight:600;">${u.name||u.email}</div><div style="font-size:12px;color:var(--text-3);">${doors} doors · ${evals} evals this month</div></div>${tierBadge}</div><div style="position:relative;height:14px;background:var(--bg);border-radius:99px;overflow:visible;margin-bottom:8px;"><div style="position:absolute;left:0;top:0;height:100%;width:${pct}%;background:${tier===2?'#10B981':tier===1?'#F59E0B':'var(--accent)'};border-radius:99px;transition:width 0.6s;"></div><div style="position:absolute;left:${tier1Pct}%;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:${doors>=structure.tiers[0].doors?'#F59E0B':'#fff'};border:2px solid ${doors>=structure.tiers[0].doors?'#F59E0B':'#D1D5DB'};"></div><div style="position:absolute;left:calc(100% - 7px);top:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:${doors>=structure.tiers[1].doors?'#10B981':'#fff'};border:2px solid ${doors>=structure.tiers[1].doors?'#10B981':'#D1D5DB'};"></div></div><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);"><span>0</span><span>${structure.tiers[0].doors} (T1)</span><span>${structure.tiers[1].doors} (T2)</span></div></div>`;
   }).join("");
-
-  el.innerHTML = `
-    <div style="font-size:13px;color:var(--text-2);margin-bottom:16px;">${monthName} — all agents</div>
-    ${agentsHtml}`;
+  el.innerHTML=`<div style="font-size:13px;color:var(--text-2);margin-bottom:16px;">${monthName} — all agents</div>${agentsHtml}`;
 }
+function updateProspectCount() { document.getElementById("prospectCount").textContent=`${allProspects.length} expired listing${allProspects.length!==1?"s":""}`; }
 
-function updateProspectCount() {
-  document.getElementById("prospectCount").textContent =
-    `${allProspects.length} expired listing${allProspects.length !== 1 ? "s" : ""}`;
-}
 
+// ── Filter bar & prospects rendering (unchanged) ───────────
 function renderFilterBar() {
-  const bar = document.getElementById("filterBar");
-  if (!bar) return;
-  const hasFilters = activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all" || activeFilters.type !== "all";
-  const hasMuni = selectedMunicipalities.size > 0;
-  const isFilterOpen = bar.dataset.filterOpen === "true";
-  const isMuniOpen = bar.dataset.muniOpen === "true";
-
-  const btn = (label, key, val, icon) => {
-    const active = activeFilters[key] === val;
-    return `<button onclick="setFilter('${key}','${val}')" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;white-space:nowrap;border:1px solid ${active ? 'var(--accent)' : 'var(--border-med)'};background:${active ? 'var(--accent)' : 'var(--surface)'};color:${active ? '#fff' : 'var(--text-2)'};font-weight:${active ? '500' : '400'};transition:all 0.15s;">${icon ? icon + ' ' : ''}${label}</button>`;
-  };
-
-  const municipalities = getMunicipalities();
-  const muniButtons = municipalities.map(m => {
-    const active = selectedMunicipalities.has(m);
-    return `<button onclick="toggleMunicipality('${m.replace(/'/g, "\\'")}')" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;white-space:nowrap;border:1px solid ${active ? 'var(--accent)' : 'var(--border-med)'};background:${active ? 'var(--accent)' : 'var(--surface)'};color:${active ? '#fff' : 'var(--text-2)'};font-weight:${active ? '500' : '400'};transition:all 0.15s;">${active ? '✓ ' : ''}${m}</button>`;
-  }).join("");
-
-  bar.innerHTML = `
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:${isFilterOpen || isMuniOpen ? '0' : '16px'};">
-      <button onclick="toggleFilterPanel()" style="display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:99px;font-size:13px;font-family:var(--font);cursor:pointer;border:1px solid ${hasFilters ? 'var(--accent)' : 'var(--border-med)'};background:${hasFilters ? 'var(--accent-light)' : 'var(--surface)'};color:${hasFilters ? 'var(--accent)' : 'var(--text-2)'};font-weight:${hasFilters ? '500' : '400'};">
-        <span>⚙ Filters${hasFilters ? ' (active)' : ''}</span>
-        <span style="font-size:10px;">${isFilterOpen ? '▲' : '▼'}</span>
-      </button>
-      <button onclick="toggleMuniPanel()" style="display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:99px;font-size:13px;font-family:var(--font);cursor:pointer;border:1px solid ${hasMuni ? 'var(--accent)' : 'var(--border-med)'};background:${hasMuni ? 'var(--accent-light)' : 'var(--surface)'};color:${hasMuni ? 'var(--accent)' : 'var(--text-2)'};font-weight:${hasMuni ? '500' : '400'};">
-        <span>📍 Municipality${hasMuni ? ` (${selectedMunicipalities.size})` : ''}</span>
-        <span style="font-size:10px;">${isMuniOpen ? '▲' : '▼'}</span>
-      </button>
-      ${hasFilters || hasMuni ? `<button onclick="resetAll()" style="padding:7px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;border:1px solid var(--red-bg);background:var(--red-bg);color:var(--red);font-weight:500;">✕ Reset all</button>` : ""}
-    </div>
-    ${isFilterOpen ? `
-    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:10px;background:var(--surface);">
-      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Type</span>
-      ${btn("All", "type", "all", "")}
-      ${btn("Condo", "type", "condo", "🏢")}
-      ${btn("House", "type", "house", "🏠")}
-      <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
-      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Sort</span>
-      ${btn("Newest", "sort", "newest", "↓")}
-      ${btn("Oldest", "sort", "oldest", "↑")}
-      ${btn("Price ↑", "sort", "price_asc", "")}
-      ${btn("Price ↓", "sort", "price_desc", "")}
-      <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
-      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Mailers</span>
-      ${btn("All", "mailing", "all", "")}
-      ${btn("None sent", "mailing", "none", "✉️")}
-      ${btn("1–3 sent", "mailing", "partial", "")}
-      ${btn("All 4 sent", "mailing", "complete", "✅")}
-      <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
-      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Visits</span>
-      ${btn("All", "visit", "all", "")}
-      ${btn("Not visited", "visit", "none", "")}
-      ${btn("Visited", "visit", "some", "🚪")}
-      <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
-      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Status</span>
-      ${btn("All", "eval", "all", "")}
-      ${btn("Eval booked", "eval", "booked", "📅")}
-      ${btn("Contacted", "eval", "contacted", "☎️")}
-      ${btn("No contact", "eval", "none", "")}
-    </div>` : ""}
-    ${isMuniOpen ? `
-    <div style="padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:10px;background:var(--surface);">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);">Select municipalities</span>
-        ${selectedMunicipalities.size > 0 ? `<button onclick="clearMunicipalities()" style="font-size:11px;color:var(--red);background:none;border:none;cursor:pointer;">Clear all</button>` : ""}
-      </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        ${municipalities.length === 0 ? '<span style="font-size:13px;color:var(--text-3);">No municipalities found — add prospects first.</span>' : muniButtons}
-      </div>
-    </div>` : ""}
-    ${isFilterOpen || isMuniOpen ? '<div style="margin-bottom:16px;"></div>' : ""}
-  `;
+  const bar=document.getElementById("filterBar"); if (!bar) return;
+  const hasFilters=activeFilters.sort!=="newest"||activeFilters.mailing!=="all"||activeFilters.visit!=="all"||activeFilters.eval!=="all"||activeFilters.type!=="all";
+  const hasMuni=selectedMunicipalities.size>0; const isFilterOpen=bar.dataset.filterOpen==="true"; const isMuniOpen=bar.dataset.muniOpen==="true";
+  const btn=(label,key,val,icon)=>{const active=activeFilters[key]===val;return`<button onclick="setFilter('${key}','${val}')" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;white-space:nowrap;border:1px solid ${active?'var(--accent)':'var(--border-med)'};background:${active?'var(--accent)':'var(--surface)'};color:${active?'#fff':'var(--text-2)'};font-weight:${active?'500':'400'};transition:all 0.15s;">${icon?icon+' ':''}${label}</button>`;};
+  const municipalities=getMunicipalities();
+  const muniButtons=municipalities.map(m=>{const active=selectedMunicipalities.has(m);return`<button onclick="toggleMunicipality('${m.replace(/'/g,"\\'")}')" style="padding:6px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;white-space:nowrap;border:1px solid ${active?'var(--accent)':'var(--border-med)'};background:${active?'var(--accent)':'var(--surface)'};color:${active?'#fff':'var(--text-2)'};font-weight:${active?'500':'400'};transition:all 0.15s;">${active?'✓ ':''}${m}</button>`;}).join("");
+  bar.innerHTML=`<div style="display:flex;gap:8px;align-items:center;margin-bottom:${isFilterOpen||isMuniOpen?'0':'16px'};">
+    <button onclick="toggleFilterPanel()" style="display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:99px;font-size:13px;font-family:var(--font);cursor:pointer;border:1px solid ${hasFilters?'var(--accent)':'var(--border-med)'};background:${hasFilters?'var(--accent-light)':'var(--surface)'};color:${hasFilters?'var(--accent)':'var(--text-2)'};font-weight:${hasFilters?'500':'400'};">⚙ Filters${hasFilters?' (active)':''} <span style="font-size:10px;">${isFilterOpen?'▲':'▼'}</span></button>
+    <button onclick="toggleMuniPanel()" style="display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:99px;font-size:13px;font-family:var(--font);cursor:pointer;border:1px solid ${hasMuni?'var(--accent)':'var(--border-med)'};background:${hasMuni?'var(--accent-light)':'var(--surface)'};color:${hasMuni?'var(--accent)':'var(--text-2)'};font-weight:${hasMuni?'500':'400'};">📍 Municipality${hasMuni?` (${selectedMunicipalities.size})`:''} <span style="font-size:10px;">${isMuniOpen?'▲':'▼'}</span></button>
+    ${hasFilters||hasMuni?`<button onclick="resetAll()" style="padding:7px 12px;border-radius:99px;font-size:12px;font-family:var(--font);cursor:pointer;border:1px solid var(--red-bg);background:var(--red-bg);color:var(--red);font-weight:500;">✕ Reset all</button>`:""}
+  </div>
+  ${isFilterOpen?`<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:10px;background:var(--surface);">
+    <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Type</span>${btn("All","type","all","")}${btn("Condo","type","condo","🏢")}${btn("House","type","house","🏠")}
+    <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
+    <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Sort</span>${btn("Newest","sort","newest","↓")}${btn("Oldest","sort","oldest","↑")}${btn("Price ↑","sort","price_asc","")}${btn("Price ↓","sort","price_desc","")}
+    <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
+    <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Mailers</span>${btn("All","mailing","all","")}${btn("None sent","mailing","none","✉️")}${btn("1–3 sent","mailing","partial","")}${btn("All 4 sent","mailing","complete","✅")}
+    <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
+    <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Visits</span>${btn("All","visit","all","")}${btn("Not visited","visit","none","")}${btn("Visited","visit","some","🚪")}
+    <span style="width:1px;height:20px;background:var(--border);margin:0 4px;"></span>
+    <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-right:2px;">Status</span>${btn("All","eval","all","")}${btn("Eval booked","eval","booked","📅")}${btn("Contacted","eval","contacted","☎️")}${btn("No contact","eval","none","")}
+  </div>`:""}
+  ${isMuniOpen?`<div style="padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:10px;background:var(--surface);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;"><span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);">Select municipalities</span>${selectedMunicipalities.size>0?`<button onclick="clearMunicipalities()" style="font-size:11px;color:var(--red);background:none;border:none;cursor:pointer;">Clear all</button>`:""}</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">${municipalities.length===0?'<span style="font-size:13px;color:var(--text-3);">No municipalities found.</span>':muniButtons}</div>
+  </div>`:""}
+  ${isFilterOpen||isMuniOpen?'<div style="margin-bottom:16px;"></div>':""}`;
 }
-
-window.toggleFilterPanel = function() {
-  const bar = document.getElementById("filterBar");
-  bar.dataset.filterOpen = bar.dataset.filterOpen === "true" ? "false" : "true";
-  bar.dataset.muniOpen = "false";
-  renderFilterBar();
-};
-
-window.toggleMuniPanel = function() {
-  const bar = document.getElementById("filterBar");
-  bar.dataset.muniOpen = bar.dataset.muniOpen === "true" ? "false" : "true";
-  bar.dataset.filterOpen = "false";
-  renderFilterBar();
-};
-
-window.toggleMunicipality = function(m) {
-  if (selectedMunicipalities.has(m)) selectedMunicipalities.delete(m);
-  else selectedMunicipalities.add(m);
-  renderFilterBar();
-  renderProspects();
-};
-
-window.clearMunicipalities = function() {
-  selectedMunicipalities.clear();
-  renderFilterBar();
-  renderProspects();
-};
-
-window.setFilter = function(key, val) {
-  activeFilters[key] = val;
-  renderFilterBar();
-  renderProspects();
-};
-
-window.resetAll = function() {
-  activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all", type: "all" };
-  selectedMunicipalities.clear();
-  const bar = document.getElementById("filterBar");
-  if (bar) { bar.dataset.filterOpen = "false"; bar.dataset.muniOpen = "false"; }
-  renderFilterBar();
-  renderProspects();
-};
-
-window.resetFilters = window.resetAll;
-
+window.toggleFilterPanel=function(){const bar=document.getElementById("filterBar");bar.dataset.filterOpen=bar.dataset.filterOpen==="true"?"false":"true";bar.dataset.muniOpen="false";renderFilterBar();};
+window.toggleMuniPanel=function(){const bar=document.getElementById("filterBar");bar.dataset.muniOpen=bar.dataset.muniOpen==="true"?"false":"true";bar.dataset.filterOpen="false";renderFilterBar();};
+window.toggleMunicipality=function(m){if(selectedMunicipalities.has(m))selectedMunicipalities.delete(m);else selectedMunicipalities.add(m);renderFilterBar();renderProspects();};
+window.clearMunicipalities=function(){selectedMunicipalities.clear();renderFilterBar();renderProspects();};
+window.setFilter=function(key,val){activeFilters[key]=val;renderFilterBar();renderProspects();};
+window.resetAll=function(){activeFilters={sort:"newest",mailing:"all",visit:"all",eval:"all",type:"all"};selectedMunicipalities.clear();const bar=document.getElementById("filterBar");if(bar){bar.dataset.filterOpen="false";bar.dataset.muniOpen="false";}renderFilterBar();renderProspects();};
+window.resetFilters=window.resetAll;
 function getFilteredAndSorted() {
-  const q = document.getElementById("searchInput").value.toLowerCase();
-  let list = [...allProspects];
-  if (q) {
-    list = list.filter(p => {
-      const names = (p.owners || []).map(o => o.name).join(" ").toLowerCase();
-      return p.mls?.includes(q) || p.listingAddress?.toLowerCase().includes(q) || names.includes(q);
-    });
-  }
-  if (activeFilters.type !== "all") list = list.filter(p => detectPropertyType(p.listingAddress) === activeFilters.type);
-  if (selectedMunicipalities.size > 0) list = list.filter(p => selectedMunicipalities.has(extractMunicipality(p.listingAddress)));
-  if (activeFilters.mailing !== "all") {
-    list = list.filter(p => {
-      const sent = (p.mail || []).filter(Boolean).length;
-      if (activeFilters.mailing === "none") return sent === 0;
-      if (activeFilters.mailing === "partial") return sent >= 1 && sent <= 3;
-      if (activeFilters.mailing === "complete") return sent === 4;
-    });
-  }
-  if (activeFilters.visit !== "all") {
-    list = list.filter(p => {
-      const visits = (p.visits || []).length;
-      if (activeFilters.visit === "none") return visits === 0;
-      if (activeFilters.visit === "some") return visits > 0;
-    });
-  }
-  if (activeFilters.eval !== "all") {
-    list = list.filter(p => {
-      const evalBooked = (p.visits || []).some(v => v.evalBooked === "yes");
-      const contacted = (p.visits || []).some(v => v.contact === "yes");
-      if (activeFilters.eval === "booked") return evalBooked;
-      if (activeFilters.eval === "contacted") return contacted && !evalBooked;
-      if (activeFilters.eval === "none") return !contacted && !evalBooked;
-    });
-  }
-  list.sort((a, b) => {
-    if (activeFilters.sort === "newest") return (b.expiry || "").localeCompare(a.expiry || "");
-    if (activeFilters.sort === "oldest") return (a.expiry || "").localeCompare(b.expiry || "");
-    if (activeFilters.sort === "price_asc") return (a.lastPrice || 0) - (b.lastPrice || 0);
-    if (activeFilters.sort === "price_desc") return (b.lastPrice || 0) - (a.lastPrice || 0);
-    return 0;
-  });
+  const q=document.getElementById("searchInput").value.toLowerCase(); let list=[...allProspects];
+  if(q)list=list.filter(p=>{const names=(p.owners||[]).map(o=>o.name).join(" ").toLowerCase();return p.mls?.includes(q)||p.listingAddress?.toLowerCase().includes(q)||names.includes(q);});
+  if(activeFilters.type!=="all")list=list.filter(p=>detectPropertyType(p.listingAddress)===activeFilters.type);
+  if(selectedMunicipalities.size>0)list=list.filter(p=>selectedMunicipalities.has(extractMunicipality(p.listingAddress)));
+  if(activeFilters.mailing!=="all")list=list.filter(p=>{const sent=(p.mail||[]).filter(Boolean).length;if(activeFilters.mailing==="none")return sent===0;if(activeFilters.mailing==="partial")return sent>=1&&sent<=3;if(activeFilters.mailing==="complete")return sent===4;});
+  if(activeFilters.visit!=="all")list=list.filter(p=>{const visits=(p.visits||[]).length;if(activeFilters.visit==="none")return visits===0;if(activeFilters.visit==="some")return visits>0;});
+  if(activeFilters.eval!=="all")list=list.filter(p=>{const evalBooked=(p.visits||[]).some(v=>v.evalBooked==="yes");const contacted=(p.visits||[]).some(v=>v.contact==="yes");if(activeFilters.eval==="booked")return evalBooked;if(activeFilters.eval==="contacted")return contacted&&!evalBooked;if(activeFilters.eval==="none")return!contacted&&!evalBooked;});
+  list.sort((a,b)=>{if(activeFilters.sort==="newest")return(b.expiry||"").localeCompare(a.expiry||"");if(activeFilters.sort==="oldest")return(a.expiry||"").localeCompare(b.expiry||"");if(activeFilters.sort==="price_asc")return(a.lastPrice||0)-(b.lastPrice||0);if(activeFilters.sort==="price_desc")return(b.lastPrice||0)-(a.lastPrice||0);return 0;});
   return list;
 }
-
-window.renderProspects = function () {
-  renderFilterBar();
-  const filtered = getFilteredAndSorted();
-  const container = document.getElementById("prospectsContainer");
-  const hasActive = activeFilters.sort !== "newest" || activeFilters.mailing !== "all" || activeFilters.visit !== "all" || activeFilters.eval !== "all" || activeFilters.type !== "all" || selectedMunicipalities.size > 0;
-  const dupIds = dupReviewMode ? new Set(getDupProspects().map(p => p.id)) : new Set();
-  if (!filtered.length) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">◎</div>
-      <div class="empty-title">${hasActive ? "No prospects match these filters" : "No prospects found"}</div>
-      <div class="empty-sub">${hasActive ? '<button onclick="resetAll()" style="margin-top:8px;padding:6px 14px;border-radius:99px;background:var(--accent);color:#fff;border:none;font-size:13px;cursor:pointer;">Reset all filters</button>' : allProspects.length === 0 && isAdmin ? "Add your first prospect using the button above." : "Try a different search."}</div>
-    </div>`;
-    return;
-  }
-  container.innerHTML = `<div class="prospects-grid">${filtered.map(p => prospectCard(p, dupIds.has(p.id))).join("")}</div>`;
+window.renderProspects=function(){
+  renderFilterBar(); const filtered=getFilteredAndSorted(); const container=document.getElementById("prospectsContainer");
+  const hasActive=activeFilters.sort!=="newest"||activeFilters.mailing!=="all"||activeFilters.visit!=="all"||activeFilters.eval!=="all"||activeFilters.type!=="all"||selectedMunicipalities.size>0;
+  const dupIds=dupReviewMode?new Set(getDupProspects().map(p=>p.id)):new Set();
+  if(!filtered.length){container.innerHTML=`<div class="empty-state"><div class="empty-icon">◎</div><div class="empty-title">${hasActive?"No prospects match these filters":"No prospects found"}</div><div class="empty-sub">${hasActive?'<button onclick="resetAll()" style="margin-top:8px;padding:6px 14px;border-radius:99px;background:var(--accent);color:#fff;border:none;font-size:13px;cursor:pointer;">Reset all filters</button>':allProspects.length===0&&isAdmin?"Add your first prospect using the button above.":"Try a different search."}</div></div>`;return;}
+  container.innerHTML=`<div class="prospects-grid">${filtered.map(p=>prospectCard(p,dupIds.has(p.id))).join("")}</div>`;
 };
-
-function prospectCard(p, isDup) {
-  const initials = (p.owners?.[0]?.name || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
-  const lastPrice = p.lastPrice ? "$" + Number(p.lastPrice).toLocaleString("fr-CA") : "—";
-  const priceDrop = p.prevPrice ? `<span class="price-drop">↓ from $${Number(p.prevPrice).toLocaleString("fr-CA")}</span>` : "";
-  const mailings = (p.mail || []).filter(Boolean).length;
-  const visits = (p.visits || []).length;
-  const evalBooked = (p.visits || []).some(v => v.evalBooked === "yes");
-  const contacted = (p.visits || []).some(v => v.contact === "yes");
-  const propType = detectPropertyType(p.listingAddress);
-  const municipality = extractMunicipality(p.listingAddress);
-  const isTargeted = todaysTargets.includes(p.id);
-  const statusBadge = evalBooked ? `<span class="badge badge-green">Eval booked</span>`
-    : contacted ? `<span class="badge badge-blue">Contacted</span>`
-    : mailings > 0 ? `<span class="badge badge-amber">${mailings} mailing${mailings > 1 ? "s" : ""} sent</span>`
-    : `<span class="badge badge-gray">Not contacted</span>`;
-  const typeBadge = propType === "condo"
-    ? `<span class="badge" style="background:#EEEDFE;color:#3C3489;">🏢 Condo</span>`
-    : `<span class="badge" style="background:#EAF3DE;color:#2D6A4F;">🏠 House</span>`;
-  const dupBadge = isDup ? `<span class="badge" style="background:var(--amber-bg);color:var(--amber);">⚠ Potential duplicate</span>` : "";
-  const cardBg = isDup && dupReviewMode ? 'border-color:#E9A000;background:#FDF3E7;' : isTargeted ? 'border-color:var(--accent);' : '';
-  const targetBtn = `<button onclick="event.stopPropagation();toggleTarget('${p.id}')" title="${isTargeted ? 'Remove from Today\'s Targets' : 'Add to Today\'s Targets'}" style="position:absolute;top:10px;right:10px;width:28px;height:28px;border-radius:50%;border:none;background:${isTargeted ? 'var(--accent)' : 'var(--border)'};color:${isTargeted ? '#fff' : 'var(--text-3)'};font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;">🎯</button>`;
-  const clickFn = dupReviewMode ? '' : exportMode ? `toggleSelectProspect('${p.mls}')` : `openProspectModal('${p.id}')`;
-  return `<div class="prospect-card" onclick="${clickFn}" style="position:relative;${cardBg}">
-    ${targetBtn}
-    <div class="card-top">
-      <div class="card-avatar">${initials}</div>
-      <div class="card-main">
-        <div class="card-name" style="padding-right:32px;">${(p.owners || []).map(o => o.name).join(", ")}</div>
-        <div class="card-addr">${p.owners?.[0]?.street || ""}, ${p.owners?.[0]?.city || ""}</div>
-        <div class="card-mls">MLS #${p.mls} · Expires ${p.expiry || "—"} · 📍 ${municipality}</div>
-      </div>
-    </div>
-    <div class="card-meta">${statusBadge}${typeBadge}${dupBadge}<span class="badge badge-red">${p.status || "Expiré"}</span></div>
-    <div class="card-tracking">
-      <div class="track-item"><div class="track-label">Last price</div><div class="track-value">${lastPrice} ${priceDrop}</div></div>
-      <div class="track-item"><div class="track-label">Mailings</div><div class="track-value">${mailings}/4</div></div>
-      <div class="track-item"><div class="track-label">Visits</div><div class="track-value">${visits}</div></div>
-    </div>
-  </div>`;
+function prospectCard(p,isDup) {
+  const initials=(p.owners?.[0]?.name||"?").split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
+  const lastPrice=p.lastPrice?"$"+Number(p.lastPrice).toLocaleString("fr-CA"):"—";
+  const priceDrop=p.prevPrice?`<span class="price-drop">↓ from $${Number(p.prevPrice).toLocaleString("fr-CA")}</span>`:"";
+  const mailings=(p.mail||[]).filter(Boolean).length; const visits=(p.visits||[]).length;
+  const evalBooked=(p.visits||[]).some(v=>v.evalBooked==="yes"); const contacted=(p.visits||[]).some(v=>v.contact==="yes");
+  const propType=detectPropertyType(p.listingAddress); const municipality=extractMunicipality(p.listingAddress);
+  const isTargeted=todaysTargets.includes(p.id);
+  const statusBadge=evalBooked?`<span class="badge badge-green">Eval booked</span>`:contacted?`<span class="badge badge-blue">Contacted</span>`:mailings>0?`<span class="badge badge-amber">${mailings} mailing${mailings>1?"s":""} sent</span>`:`<span class="badge badge-gray">Not contacted</span>`;
+  const typeBadge=propType==="condo"?`<span class="badge" style="background:#EEEDFE;color:#3C3489;">🏢 Condo</span>`:`<span class="badge" style="background:#EAF3DE;color:#2D6A4F;">🏠 House</span>`;
+  const dupBadge=isDup?`<span class="badge" style="background:var(--amber-bg);color:var(--amber);">⚠ Potential duplicate</span>`:"";
+  const cardBg=isDup&&dupReviewMode?'border-color:#E9A000;background:#FDF3E7;':isTargeted?'border-color:var(--accent);':"";
+  const targetBtn=`<button onclick="event.stopPropagation();toggleTarget('${p.id}')" title="${isTargeted?"Remove from Today's Targets":"Add to Today's Targets"}" style="position:absolute;top:10px;right:10px;width:28px;height:28px;border-radius:50%;border:none;background:${isTargeted?'var(--accent)':'var(--border)'};color:${isTargeted?'#fff':'var(--text-3)'};font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;">🎯</button>`;
+  const clickFn=dupReviewMode?"":exportMode?`toggleSelectProspect('${p.mls}')`:`openProspectModal('${p.id}')`;
+  return `<div class="prospect-card" onclick="${clickFn}" style="position:relative;${cardBg}">${targetBtn}<div class="card-top"><div class="card-avatar">${initials}</div><div class="card-main"><div class="card-name" style="padding-right:32px;">${(p.owners||[]).map(o=>o.name).join(", ")}</div><div class="card-addr">${p.owners?.[0]?.street||""}, ${p.owners?.[0]?.city||""}</div><div class="card-mls">MLS #${p.mls} · Expires ${p.expiry||"—"} · 📍 ${municipality}</div></div></div><div class="card-meta">${statusBadge}${typeBadge}${dupBadge}<span class="badge badge-red">${p.status||"Expiré"}</span></div><div class="card-tracking"><div class="track-item"><div class="track-label">Last price</div><div class="track-value">${lastPrice} ${priceDrop}</div></div><div class="track-item"><div class="track-label">Mailings</div><div class="track-value">${mailings}/4</div></div><div class="track-item"><div class="track-label">Visits</div><div class="track-value">${visits}</div></div></div></div>`;
 }
-
-window.startDupReview = function() {
-  const groups = getDupGroups();
-  if (Object.keys(groups).length === 0) { showToast("No duplicates found in your database"); return; }
-  dupReviewMode = true;
-  selectedMLS.clear();
-  renderProspects();
-  showDupReviewModal(groups);
-};
-
-window.cancelDupReview = function() {
-  dupReviewMode = false;
-  selectedMLS.clear();
-  renderProspects();
-  const banner = document.getElementById("dupBanner");
-  if (banner) banner.style.display = "none";
-};
-
+window.startDupReview=function(){const groups=getDupGroups();if(!Object.keys(groups).length){showToast("No duplicates found");return;}dupReviewMode=true;selectedMLS.clear();renderProspects();showDupReviewModal(groups);};
+window.cancelDupReview=function(){dupReviewMode=false;selectedMLS.clear();renderProspects();const banner=document.getElementById("dupBanner");if(banner)banner.style.display="none";};
 function showDupReviewModal(groups) {
-  const groupKeys = Object.keys(groups);
-  const groupsHtml = groupKeys.map(mls => {
-    const pair = groups[mls];
-    const master = pair[0];
-    const dupes = pair.slice(1);
-    const masterName = (master.owners||[]).map(o=>o.name).join(", ") || "Unknown";
-    const masterMail = (master.mail||[]).filter(Boolean).length;
-    const masterVisits = (master.visits||[]).length;
-    const dupesHtml = dupes.map(d => {
-      const dName = (d.owners||[]).map(o=>o.name).join(", ") || "Unknown";
-      const dMail = (d.mail||[]).filter(Boolean).length;
-      const dVisits = (d.visits||[]).length;
-      return `
-        <div style="background:#FDF3E7;border:1px solid #E9A000;border-radius:8px;padding:10px 12px;margin-top:8px;">
-          <div style="font-size:12px;font-weight:500;color:#7A4F1D;margin-bottom:4px;">Duplicate — will be merged then deleted</div>
-          <div style="font-size:13px;font-weight:500;">${dName}</div>
-          <div style="font-size:12px;color:var(--text-3);">Added ${d.createdAt?.toDate ? d.createdAt.toDate().toLocaleDateString("en-CA") : "—"} · ${dMail} mailings · ${dVisits} visits</div>
-          <div style="display:flex;gap:8px;margin-top:8px;">
-            <button onclick="mergeProspects('${master.id}','${d.id}')" style="flex:1;padding:7px;border-radius:6px;background:var(--accent);color:#fff;border:none;font-size:12px;font-family:var(--font);cursor:pointer;font-weight:500;">⇒ Merge into master</button>
-            <button onclick="deleteSingleDup('${d.id}')" style="padding:7px 10px;border-radius:6px;background:var(--red-bg);color:var(--red);border:none;font-size:12px;font-family:var(--font);cursor:pointer;">Delete only</button>
-          </div>
-        </div>`;
-    }).join("");
-    return `
-      <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px;background:var(--surface);">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-bottom:6px;">MLS #${mls}</div>
-        <div style="background:var(--accent-light);border:1px solid var(--accent);border-radius:8px;padding:10px 12px;margin-bottom:4px;">
-          <div style="font-size:12px;font-weight:500;color:var(--accent);margin-bottom:4px;">✓ Master — will be kept</div>
-          <div style="font-size:13px;font-weight:500;">${masterName}</div>
-          <div style="font-size:12px;color:var(--text-3);">Added ${master.createdAt?.toDate ? master.createdAt.toDate().toLocaleDateString("en-CA") : "—"} · ${masterMail} mailings · ${masterVisits} visits</div>
-        </div>
-        ${dupesHtml}
-      </div>`;
+  const groupKeys=Object.keys(groups);
+  const groupsHtml=groupKeys.map(mls=>{
+    const pair=groups[mls]; const master=pair[0]; const dupes=pair.slice(1);
+    const masterName=(master.owners||[]).map(o=>o.name).join(", ")||"Unknown";
+    const masterMail=(master.mail||[]).filter(Boolean).length; const masterVisits=(master.visits||[]).length;
+    const dupesHtml=dupes.map(d=>{const dName=(d.owners||[]).map(o=>o.name).join(", ")||"Unknown";const dMail=(d.mail||[]).filter(Boolean).length;const dVisits=(d.visits||[]).length;return`<div style="background:#FDF3E7;border:1px solid #E9A000;border-radius:8px;padding:10px 12px;margin-top:8px;"><div style="font-size:12px;font-weight:500;color:#7A4F1D;margin-bottom:4px;">Duplicate — will be merged then deleted</div><div style="font-size:13px;font-weight:500;">${dName}</div><div style="font-size:12px;color:var(--text-3);">Added ${d.createdAt?.toDate?d.createdAt.toDate().toLocaleDateString("en-CA"):"—"} · ${dMail} mailings · ${dVisits} visits</div><div style="display:flex;gap:8px;margin-top:8px;"><button onclick="mergeProspects('${master.id}','${d.id}')" style="flex:1;padding:7px;border-radius:6px;background:var(--accent);color:#fff;border:none;font-size:12px;font-family:var(--font);cursor:pointer;font-weight:500;">⇒ Merge into master</button><button onclick="deleteSingleDup('${d.id}')" style="padding:7px 10px;border-radius:6px;background:var(--red-bg);color:var(--red);border:none;font-size:12px;font-family:var(--font);cursor:pointer;">Delete only</button></div></div>`;}).join("");
+    return `<div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px;background:var(--surface);"><div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-3);margin-bottom:6px;">MLS #${mls}</div><div style="background:var(--accent-light);border:1px solid var(--accent);border-radius:8px;padding:10px 12px;margin-bottom:4px;"><div style="font-size:12px;font-weight:500;color:var(--accent);margin-bottom:4px;">✓ Master — will be kept</div><div style="font-size:13px;font-weight:500;">${masterName}</div><div style="font-size:12px;color:var(--text-3);">Added ${master.createdAt?.toDate?master.createdAt.toDate().toLocaleDateString("en-CA"):"—"} · ${masterMail} mailings · ${masterVisits} visits</div></div>${dupesHtml}</div>`;
   }).join("");
-
-  document.getElementById("prospectModalContent").innerHTML = `
-    <div class="modal-header">
-      <div><div class="modal-title">Review Duplicates</div>
-      <div class="modal-sub">${groupKeys.length} MLS number${groupKeys.length !== 1 ? "s" : ""} with duplicates</div></div>
-      <button class="close-x" onclick="closeDupModal()">×</button>
-    </div>
-    <div style="background:var(--accent-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--accent);line-height:1.6;">
-      <strong>How merging works:</strong> The oldest record becomes the master. Visits and mailing dates from all duplicates are combined into the master, then duplicates are deleted.
-    </div>
-    <div style="margin-bottom:12px;">
-      <button onclick="mergeAllDuplicates()" style="width:100%;padding:10px;border-radius:8px;background:var(--accent);color:#fff;border:none;font-size:13px;font-family:var(--font);cursor:pointer;font-weight:500;">⇒ Merge all duplicates automatically</button>
-    </div>
-    ${groupsHtml}
-    <div class="modal-actions">
-      <button class="btn-secondary" onclick="closeDupModal()">Done</button>
-    </div>`;
+  document.getElementById("prospectModalContent").innerHTML=`<div class="modal-header"><div><div class="modal-title">Review Duplicates</div><div class="modal-sub">${groupKeys.length} MLS number${groupKeys.length!==1?"s":""} with duplicates</div></div><button class="close-x" onclick="closeDupModal()">×</button></div><div style="background:var(--accent-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--accent);line-height:1.6;"><strong>How merging works:</strong> The oldest record becomes the master. Visits and mailing dates from all duplicates are combined, then duplicates are deleted.</div><div style="margin-bottom:12px;"><button onclick="mergeAllDuplicates()" style="width:100%;padding:10px;border-radius:8px;background:var(--accent);color:#fff;border:none;font-size:13px;font-family:var(--font);cursor:pointer;font-weight:500;">⇒ Merge all duplicates automatically</button></div>${groupsHtml}<div class="modal-actions"><button class="btn-secondary" onclick="closeDupModal()">Done</button></div>`;
   openModal("prospectModal");
 }
-
-window.closeDupModal = function() {
-  dupReviewMode = false;
-  renderProspects();
-  const banner = document.getElementById("dupBanner");
-  if (banner) banner.style.display = "none";
-  document.getElementById("modalOverlay").classList.remove("open");
-  document.querySelectorAll(".modal").forEach(m => m.classList.remove("active"));
-};
-
-function mergeMail(mail1, mail2) {
-  const result = ["", "", "", ""];
-  for (let i = 0; i < 4; i++) result[i] = mail1[i] || mail2[i] || "";
-  return result;
-}
-
-window.mergeProspects = async function(masterId, dupId) {
-  const master = allProspects.find(p => p.id === masterId);
-  const dup = allProspects.find(p => p.id === dupId);
-  if (!master || !dup) return;
-  const mergedMail = mergeMail(master.mail || ["","","",""], dup.mail || ["","","",""]);
-  const mergedVisits = [...(master.visits || []), ...(dup.visits || [])];
-  await updateDoc(doc(db, "prospects", masterId), { mail: mergedMail, visits: mergedVisits });
-  await deleteDoc(doc(db, "prospects", dupId));
-  showToast("Merged successfully");
-  const groups = getDupGroups();
-  if (Object.keys(groups).length === 0) { closeDupModal(); showToast("All duplicates resolved!"); }
-  else showDupReviewModal(groups);
-};
-
-window.deleteSingleDup = async function(dupId) {
-  if (!confirm("Delete this duplicate without merging?")) return;
-  await deleteDoc(doc(db, "prospects", dupId));
-  showToast("Deleted");
-  const groups = getDupGroups();
-  if (Object.keys(groups).length === 0) closeDupModal();
-  else showDupReviewModal(groups);
-};
-
-window.mergeAllDuplicates = async function() {
-  if (!confirm("Merge all duplicate groups automatically? The oldest record in each group will be kept.")) return;
-  const groups = getDupGroups();
-  let merged = 0;
-  for (const mls of Object.keys(groups)) {
-    const group = groups[mls];
-    const master = group[0];
-    const dupes = group.slice(1);
-    let mergedMail = master.mail || ["","","",""];
-    let mergedVisits = [...(master.visits || [])];
-    for (const dup of dupes) {
-      mergedMail = mergeMail(mergedMail, dup.mail || ["","","",""]);
-      mergedVisits = [...mergedVisits, ...(dup.visits || [])];
-    }
-    await updateDoc(doc(db, "prospects", master.id), { mail: mergedMail, visits: mergedVisits });
-    for (const dup of dupes) { await deleteDoc(doc(db, "prospects", dup.id)); merged++; }
-  }
-  closeDupModal();
-  showToast(`Merged and removed ${merged} duplicate${merged !== 1 ? "s" : ""}`);
-};
-
-window.openProspectModal = async function (id) {
-  if (exportMode || dupReviewMode) return;
-  const p = allProspects.find(x => x.id === id);
-  if (!p) return;
-  renderProspectModal(p);
-  openModal("prospectModal");
-};
-
+window.closeDupModal=function(){dupReviewMode=false;renderProspects();const banner=document.getElementById("dupBanner");if(banner)banner.style.display="none";document.getElementById("modalOverlay").classList.remove("open");document.querySelectorAll(".modal").forEach(m=>m.classList.remove("active"));};
+function mergeMail(m1,m2){const r=["","","",""];for(let i=0;i<4;i++)r[i]=m1[i]||m2[i]||"";return r;}
+window.mergeProspects=async function(masterId,dupId){const master=allProspects.find(p=>p.id===masterId);const dup=allProspects.find(p=>p.id===dupId);if(!master||!dup)return;const mergedMail=mergeMail(master.mail||["","","",""],dup.mail||["","","",""]);const mergedVisits=[...(master.visits||[]),...(dup.visits||[])];await updateDoc(doc(db,"prospects",masterId),{mail:mergedMail,visits:mergedVisits});await deleteDoc(doc(db,"prospects",dupId));showToast("Merged successfully");const groups=getDupGroups();if(!Object.keys(groups).length){closeDupModal();showToast("All duplicates resolved!");}else showDupReviewModal(groups);};
+window.deleteSingleDup=async function(dupId){if(!confirm("Delete this duplicate without merging?"))return;await deleteDoc(doc(db,"prospects",dupId));showToast("Deleted");const groups=getDupGroups();if(!Object.keys(groups).length)closeDupModal();else showDupReviewModal(groups);};
+window.mergeAllDuplicates=async function(){if(!confirm("Merge all duplicate groups automatically?"))return;const groups=getDupGroups();let merged=0;for(const mls of Object.keys(groups)){const group=groups[mls];const master=group[0];const dupes=group.slice(1);let mergedMail=master.mail||["","","",""];let mergedVisits=[...(master.visits||[])];for(const dup of dupes){mergedMail=mergeMail(mergedMail,dup.mail||["","","",""]);mergedVisits=[...mergedVisits,...(dup.visits||[])];}await updateDoc(doc(db,"prospects",master.id),{mail:mergedMail,visits:mergedVisits});for(const dup of dupes){await deleteDoc(doc(db,"prospects",dup.id));merged++;}}closeDupModal();showToast(`Merged and removed ${merged} duplicate${merged!==1?"s":""}`);};
+window.openProspectModal=async function(id){if(exportMode||dupReviewMode)return;const p=allProspects.find(x=>x.id===id);if(!p)return;renderProspectModal(p);openModal("prospectModal");};
 function renderProspectModal(p) {
-  const fmt = n => n ? "$" + Number(n).toLocaleString("fr-CA") : "—";
-  const propType = detectPropertyType(p.listingAddress);
-  const municipality = extractMunicipality(p.listingAddress);
-  const isTargeted = todaysTargets.includes(p.id);
-  const ownersHtml = (p.owners || []).map(o => `
-    <div class="owner-block"><div class="on">${o.name}</div>
-    <div class="oa">${o.street}<br>${o.city} &nbsp;${o.postal}</div></div>`).join("");
-  const mailHtml = [0,1,2,3].map(i => `
-    <div class="mail-slot"><label>Mailing ${i+1}</label>
-    <input type="date" value="${(p.mail || [])[i] || ""}" onchange="updateMailDate('${p.id}',${i},this.value)" /></div>`).join("");
-  const visits = p.visits || [];
-  const visitRows = visits.length === 0
-    ? `<p style="font-size:13px;color:var(--text-3);padding:8px 0;">No visits logged yet.</p>`
-    : `<div class="visit-col-labels"><span>Date</span><span>Contact?</span><span>Eval?</span><span></span></div>` +
-      visits.map((v, i) => `
-        <div class="visit-entry">
-          <input type="date" value="${v.date || ""}" onchange="updateVisitField('${p.id}',${i},'date',this.value)" />
-          <button class="yn-btn ${v.contact === 'yes' ? 'yes' : v.contact === 'no' ? 'no' : ''}" onclick="cycleVisitField('${p.id}',${i},'contact')">
-            ${v.contact === 'yes' ? '✓' : v.contact === 'no' ? '✕' : '—'}<span class="yn-label">Contact</span>
-          </button>
-          <button class="yn-btn ${v.evalBooked === 'yes' ? 'yes' : v.evalBooked === 'no' ? 'no' : ''}" onclick="cycleVisitField('${p.id}',${i},'evalBooked')">
-            ${v.evalBooked === 'yes' ? '✓' : v.evalBooked === 'no' ? '✕' : '—'}<span class="yn-label">Eval</span>
-          </button>
-          <button class="icon-btn red" onclick="removeVisit('${p.id}',${i})">✕</button>
-        </div>`).join("");
-  const adminActions = isAdmin ? `
-    <div class="modal-section"><div class="modal-section-title">Admin</div>
-    <button class="btn-danger" onclick="deleteProspect('${p.id}')">Delete prospect</button></div>` : "";
-  document.getElementById("prospectModalContent").innerHTML = `
-    <div class="modal-header">
-      <div><div class="modal-title">${(p.owners || []).map(o => o.name).join(", ")}</div>
-      <div class="modal-sub">MLS #${p.mls} · ${p.listingAddress || ""}</div></div>
-      <button class="close-x" onclick="closeAllModals()">×</button>
-    </div>
-    <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
-      ${propType === "condo" ? '<span class="badge" style="background:#EEEDFE;color:#3C3489;">🏢 Condo</span>' : '<span class="badge" style="background:#EAF3DE;color:#2D6A4F;">🏠 House</span>'}
-      <span class="badge badge-gray">📍 ${municipality}</span>
-      <button onclick="toggleTarget('${p.id}')" style="margin-left:auto;padding:6px 12px;border-radius:99px;border:1px solid ${isTargeted ? 'var(--accent)' : 'var(--border-med)'};background:${isTargeted ? 'var(--accent)' : 'var(--surface)'};color:${isTargeted ? '#fff' : 'var(--text-2)'};font-size:12px;font-family:var(--font);cursor:pointer;">🎯 ${isTargeted ? "In Today's Targets" : "Add to Today's Targets"}</button>
-    </div>
-    <div class="detail-grid">
-      <div class="detail-field"><div class="lbl">Last price</div><div class="val">${fmt(p.lastPrice)}</div></div>
-      <div class="detail-field"><div class="lbl">Original price</div><div class="val">${fmt(p.origPrice)}</div></div>
-      <div class="detail-field"><div class="lbl">Contract start</div><div class="val">${p.contractStart || "—"}</div></div>
-      <div class="detail-field"><div class="lbl">Expiry</div><div class="val">${p.expiry || "—"}</div></div>
-    </div>
-    <div class="modal-section"><div class="modal-section-title">Agency &amp; Broker</div>
-      <div style="font-size:14px;font-weight:500;">${p.broker || "—"}</div>
-      <div style="font-size:13px;color:var(--text-2);">${p.agency || ""} · ${p.brokerPhone || ""}</div>
-    </div>
-    <div class="modal-section"><div class="modal-section-title">Owner(s) — Mailing Address</div>${ownersHtml}</div>
-    <div class="modal-section"><div class="modal-section-title">Mailing Attempts</div>
-      <div class="mail-grid">${mailHtml}</div>
-    </div>
-    <div class="modal-section">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <div class="modal-section-title" style="margin:0;">Door-to-Door Visits</div>
-        <button class="btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="addVisit('${p.id}')">+ Add visit</button>
-      </div>
-      ${visitRows}
-    </div>
-    ${adminActions}`;
+  const fmt=n=>n?"$"+Number(n).toLocaleString("fr-CA"):"—"; const propType=detectPropertyType(p.listingAddress); const municipality=extractMunicipality(p.listingAddress); const isTargeted=todaysTargets.includes(p.id);
+  const ownersHtml=(p.owners||[]).map(o=>`<div class="owner-block"><div class="on">${o.name}</div><div class="oa">${o.street}<br>${o.city} &nbsp;${o.postal}</div></div>`).join("");
+  const mailHtml=[0,1,2,3].map(i=>`<div class="mail-slot"><label>Mailing ${i+1}</label><input type="date" value="${(p.mail||[])[i]||""}" onchange="updateMailDate('${p.id}',${i},this.value)" /></div>`).join("");
+  const visits=p.visits||[]; const visitRows=visits.length===0?`<p style="font-size:13px;color:var(--text-3);padding:8px 0;">No visits logged yet.</p>`:`<div class="visit-col-labels"><span>Date</span><span>Contact?</span><span>Eval?</span><span></span></div>`+visits.map((v,i)=>`<div class="visit-entry"><input type="date" value="${v.date||""}" onchange="updateVisitField('${p.id}',${i},'date',this.value)" /><button class="yn-btn ${v.contact==='yes'?'yes':v.contact==='no'?'no':''}" onclick="cycleVisitField('${p.id}',${i},'contact')">${v.contact==='yes'?'✓':v.contact==='no'?'✕':'—'}<span class="yn-label">Contact</span></button><button class="yn-btn ${v.evalBooked==='yes'?'yes':v.evalBooked==='no'?'no':''}" onclick="cycleVisitField('${p.id}',${i},'evalBooked')">${v.evalBooked==='yes'?'✓':v.evalBooked==='no'?'✕':'—'}<span class="yn-label">Eval</span></button><button class="icon-btn red" onclick="removeVisit('${p.id}',${i})">✕</button></div>`).join("");
+  const adminActions=isAdmin?`<div class="modal-section"><div class="modal-section-title">Admin</div><button class="btn-danger" onclick="deleteProspect('${p.id}')">Delete prospect</button></div>`:"";
+  document.getElementById("prospectModalContent").innerHTML=`<div class="modal-header"><div><div class="modal-title">${(p.owners||[]).map(o=>o.name).join(", ")}</div><div class="modal-sub">MLS #${p.mls} · ${p.listingAddress||""}</div></div><button class="close-x" onclick="closeAllModals()">×</button></div><div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">${propType==="condo"?'<span class="badge" style="background:#EEEDFE;color:#3C3489;">🏢 Condo</span>':'<span class="badge" style="background:#EAF3DE;color:#2D6A4F;">🏠 House</span>'}<span class="badge badge-gray">📍 ${municipality}</span><button onclick="toggleTarget('${p.id}')" style="margin-left:auto;padding:6px 12px;border-radius:99px;border:1px solid ${isTargeted?'var(--accent)':'var(--border-med)'};background:${isTargeted?'var(--accent)':'var(--surface)'};color:${isTargeted?'#fff':'var(--text-2)'};font-size:12px;font-family:var(--font);cursor:pointer;">🎯 ${isTargeted?"In Today's Targets":"Add to Today's Targets"}</button></div><div class="detail-grid"><div class="detail-field"><div class="lbl">Last price</div><div class="val">${fmt(p.lastPrice)}</div></div><div class="detail-field"><div class="lbl">Original price</div><div class="val">${fmt(p.origPrice)}</div></div><div class="detail-field"><div class="lbl">Contract start</div><div class="val">${p.contractStart||"—"}</div></div><div class="detail-field"><div class="lbl">Expiry</div><div class="val">${p.expiry||"—"}</div></div></div><div class="modal-section"><div class="modal-section-title">Agency &amp; Broker</div><div style="font-size:14px;font-weight:500;">${p.broker||"—"}</div><div style="font-size:13px;color:var(--text-2);">${p.agency||""} · ${p.brokerPhone||""}</div></div><div class="modal-section"><div class="modal-section-title">Owner(s) — Mailing Address</div>${ownersHtml}</div><div class="modal-section"><div class="modal-section-title">Mailing Attempts</div><div class="mail-grid">${mailHtml}</div></div><div class="modal-section"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;"><div class="modal-section-title" style="margin:0;">Door-to-Door Visits</div><button class="btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="addVisit('${p.id}')">+ Add visit</button></div>${visitRows}</div>${adminActions}`;
 }
+window.updateMailDate=async function(id,idx,val){const p=allProspects.find(x=>x.id===id);if(!p)return;const mail=[...(p.mail||["","","",""])];while(mail.length<4)mail.push("");mail[idx]=val;await updateDoc(doc(db,"prospects",id),{mail});logActivity(id,`Mailing ${idx+1} date set to ${val}`);};
+window.updateVisitField=async function(id,idx,field,val){const p=allProspects.find(x=>x.id===id);if(!p)return;const visits=[...(p.visits||[])];visits[idx]={...visits[idx],[field]:val};await updateDoc(doc(db,"prospects",id),{visits});};
+window.cycleVisitField=async function(id,idx,field){const p=allProspects.find(x=>x.id===id);if(!p)return;const visits=[...(p.visits||[])];const cur=visits[idx][field];visits[idx]={...visits[idx],[field]:cur==="yes"?"no":cur==="no"?"":"yes"};await updateDoc(doc(db,"prospects",id),{visits});const label=field==="contact"?"Contact made":"Eval booked";if(visits[idx][field]==="yes")logActivity(id,`${label} — marked YES`);renderProspectModal({...p,visits});};
+window.addVisit=async function(id){const p=allProspects.find(x=>x.id===id);if(!p)return;const visits=[...(p.visits||[]),{date:"",contact:"",evalBooked:"",agentId:currentUser.uid,agentName:currentUserProfile?.name||currentUser.email}];await updateDoc(doc(db,"prospects",id),{visits});logActivity(id,"Door-to-door visit logged");renderProspectModal({...p,visits});};
+window.removeVisit=async function(id,idx){const p=allProspects.find(x=>x.id===id);if(!p)return;const visits=[...(p.visits||[])];visits.splice(idx,1);await updateDoc(doc(db,"prospects",id),{visits});renderProspectModal({...p,visits});};
+async function logActivity(prospectId,action){await addDoc(collection(db,"activity"),{prospectId,action,agentId:currentUser.uid,agentName:currentUserProfile?.name||currentUser.email,timestamp:serverTimestamp()});}
 
-window.updateMailDate = async function (id, idx, val) {
-  const p = allProspects.find(x => x.id === id);
-  if (!p) return;
-  const mail = [...(p.mail || ["","","",""])];
-  while (mail.length < 4) mail.push("");
-  mail[idx] = val;
-  await updateDoc(doc(db, "prospects", id), { mail });
-  logActivity(id, `Mailing ${idx+1} date set to ${val}`);
-};
-
-window.updateVisitField = async function (id, idx, field, val) {
-  const p = allProspects.find(x => x.id === id);
-  if (!p) return;
-  const visits = [...(p.visits || [])];
-  visits[idx] = { ...visits[idx], [field]: val };
-  await updateDoc(doc(db, "prospects", id), { visits });
-};
-
-window.cycleVisitField = async function (id, idx, field) {
-  const p = allProspects.find(x => x.id === id);
-  if (!p) return;
-  const visits = [...(p.visits || [])];
-  const cur = visits[idx][field];
-  visits[idx] = { ...visits[idx], [field]: cur === "yes" ? "no" : cur === "no" ? "" : "yes" };
-  await updateDoc(doc(db, "prospects", id), { visits });
-  const label = field === "contact" ? "Contact made" : "Eval booked";
-  if (visits[idx][field] === "yes") logActivity(id, `${label} — marked YES`);
-  renderProspectModal({ ...p, visits });
-};
-
-window.addVisit = async function (id) {
-  const p = allProspects.find(x => x.id === id);
-  if (!p) return;
-  const visits = [...(p.visits || []), { date: "", contact: "", evalBooked: "", agentId: currentUser.uid, agentName: currentUserProfile?.name || currentUser.email }];
-  await updateDoc(doc(db, "prospects", id), { visits });
-  logActivity(id, "Door-to-door visit logged");
-  renderProspectModal({ ...p, visits });
-};
-
-window.removeVisit = async function (id, idx) {
-  const p = allProspects.find(x => x.id === id);
-  if (!p) return;
-  const visits = [...(p.visits || [])];
-  visits.splice(idx, 1);
-  await updateDoc(doc(db, "prospects", id), { visits });
-  renderProspectModal({ ...p, visits });
-};
-
-async function logActivity(prospectId, action) {
-  await addDoc(collection(db, "activity"), {
-    prospectId, action, agentId: currentUser.uid,
-    agentName: currentUserProfile?.name || currentUser.email,
-    timestamp: serverTimestamp()
-  });
-}
-
-window.openAddProspect = function (tab) {
-  tab = tab || "single";
-  document.getElementById("addProspectContent").innerHTML = `
-    <div class="modal-header"><div class="modal-title">Add Prospects</div>
-      <button class="close-x" onclick="closeAllModals()">×</button></div>
-    <div style="display:flex;gap:0;margin-bottom:20px;border:1px solid var(--border-med);border-radius:var(--radius);overflow:hidden;">
-      <button onclick="openAddProspect('single')" style="flex:1;padding:9px;font-size:13px;font-family:var(--font);border:none;cursor:pointer;background:${tab==='single'?'var(--accent)':'var(--surface)'};color:${tab==='single'?'#fff':'var(--text-2)'};">Single Entry</button>
-      <button onclick="openAddProspect('bulk')" style="flex:1;padding:9px;font-size:13px;font-family:var(--font);border:none;border-left:1px solid var(--border-med);cursor:pointer;background:${tab==='bulk'?'var(--accent)':'var(--surface)'};color:${tab==='bulk'?'#fff':'var(--text-2)'};">Bulk CSV Import</button>
-    </div>
-    ${tab === 'single' ? singleEntryForm() : bulkImportForm()}`;
-  openModal("addProspectModal");
-};
-
-function singleEntryForm() {
-  return `
-    <div class="form-group"><label>MLS #</label><input type="text" id="ap_mls" placeholder="e.g. 9183921" /></div>
-    <div class="form-group"><label>Status</label>
-      <select id="ap_status"><option value="Expiré">Expiré</option><option value="Annulé">Annulé</option></select></div>
-    <div class="form-group"><label>Listing Address</label><input type="text" id="ap_listingAddr" placeholder="e.g. 10200 Boul. de l'Acadie, app. 814, Montréal (Ahuntsic-Cartierville)" /></div>
-    <div class="form-group"><label>Contract Start</label><input type="date" id="ap_start" /></div>
-    <div class="form-group"><label>Expiry Date</label><input type="date" id="ap_expiry" /></div>
-    <div class="form-group"><label>Last Price ($)</label><input type="number" id="ap_price" /></div>
-    <div class="form-group"><label>Original Price ($)</label><input type="number" id="ap_origPrice" /></div>
-    <div class="form-group"><label>Previous Price ($)</label><input type="number" id="ap_prevPrice" /></div>
-    <div class="form-group"><label>Agency</label><input type="text" id="ap_agency" /></div>
-    <div class="form-group"><label>Broker Name</label><input type="text" id="ap_broker" /></div>
-    <div class="form-group"><label>Broker Phone</label><input type="text" id="ap_phone" /></div>
-    <hr class="divider" />
-    <p style="font-size:13px;font-weight:500;margin-bottom:12px;">Owner 1 — Mailing Address</p>
-    <div class="form-group"><label>Owner Name</label><input type="text" id="ap_o1name" /></div>
-    <div class="form-group"><label>Street</label><input type="text" id="ap_o1street" /></div>
-    <div class="form-group"><label>City</label><input type="text" id="ap_o1city" /></div>
-    <div class="form-group"><label>Postal Code</label><input type="text" id="ap_o1postal" /></div>
-    <hr class="divider" />
-    <p style="font-size:13px;font-weight:500;margin-bottom:12px;">Owner 2 (optional)</p>
-    <div class="form-group"><label>Owner Name</label><input type="text" id="ap_o2name" /></div>
-    <div class="form-group"><label>Street</label><input type="text" id="ap_o2street" /></div>
-    <div class="form-group"><label>City</label><input type="text" id="ap_o2city" /></div>
-    <div class="form-group"><label>Postal Code</label><input type="text" id="ap_o2postal" /></div>
-    <div id="ap_error" class="error-msg" style="display:none;margin-top:8px;"></div>
-    <div class="modal-actions">
-      <button class="btn-secondary" onclick="closeAllModals()">Cancel</button>
-      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="saveNewProspect()">Save Prospect</button>
-    </div>`;
-}
-
-function bulkImportForm() {
-  return `
-    <div style="background:var(--accent-light);border-radius:var(--radius);padding:14px;margin-bottom:16px;">
-      <p style="font-size:13px;font-weight:500;color:var(--accent);margin-bottom:6px;">How it works</p>
-      <p style="font-size:12px;color:var(--accent);line-height:1.6;">1. Download the CSV template below<br>2. Open in Excel or Google Sheets<br>3. Fill in your prospects (one per row)<br>4. Save as CSV and upload here</p>
-    </div>
-    <div style="margin-bottom:16px;">
-      <button class="btn-secondary" style="width:100%;" onclick="downloadTemplate()">↓ Download CSV Template</button>
-    </div>
-    <div class="form-group"><label>Upload your filled CSV</label>
-      <input type="file" id="csvFileInput" accept=".csv" onchange="previewCSV(this)" style="padding:8px;background:var(--bg);" /></div>
-    <div id="csvPreview" style="display:none;margin-bottom:16px;">
-      <div style="font-size:12px;font-weight:500;color:var(--text-2);margin-bottom:8px;" id="csvPreviewLabel"></div>
-      <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);" id="csvPreviewList"></div>
-    </div>
-    <div id="ap_error" class="error-msg" style="display:none;margin-top:8px;"></div>
-    <div class="modal-actions">
-      <button class="btn-secondary" onclick="closeAllModals()">Cancel</button>
-      <button class="btn-primary" id="importBtn" style="width:auto;padding:9px 20px;display:none;" onclick="runBulkImport()">Import All</button>
-    </div>`;
-}
-
-window.downloadTemplate = function() {
-  const headers = "mls,status,listingAddress,contractStart,expiry,lastPrice,origPrice,prevPrice,agency,broker,brokerPhone,owner1Name,owner1Street,owner1City,owner1Postal,owner2Name,owner2Street,owner2City,owner2Postal";
-  const example = '9183921,Expiré,"10200 Boul. de Acadie, app. 814, Montréal (Ahuntsic-Cartierville)",2025-09-17,2026-03-31,540000,540000,,LES IMMEUBLES HOME-PRO,Amir Keryakes,514-943-2647,Medhat Azer,10200 Acadie app. 814,Montreal,H4N 3L3,,,,';
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([headers + "\n" + example], {type:"text/csv"}));
-  a.download = "prospects-template.csv"; a.click();
-};
-
-let parsedCSVRows = [];
-window._csvRows = [];
-window._csvHeaders = [];
-
-window.previewCSV = function(input) {
-  const file = input.files[0]; if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(e) {
-    try {
-      const rows = parseCSV(e.target.result);
-      if (rows.length < 2) { showToast("CSV appears empty or invalid"); return; }
-      const headers = rows[0].map(h => h.trim().toLowerCase());
-      window._csvHeaders = headers;
-      parsedCSVRows = rows.slice(1).filter(r => r.some(c => c.trim()));
-      window._csvRows = parsedCSVRows;
-      const isAlt = headers.includes("mls#") || headers.includes("owner 1 full address");
-      const get = (row, col) => { const idx = headers.indexOf(col); return idx >= 0 ? (row[idx] || "").trim() : ""; };
-      const preview = parsedCSVRows.map(row => {
-        const mls = isAlt ? get(row,"mls#") : get(row,"mls");
-        const owner = isAlt ? get(row,"owner 1 name") : get(row,"owner1name");
-        const addr = isAlt ? get(row,"listing address") : get(row,"listingaddress");
-        const price = isAlt ? get(row,"last price") : get(row,"lastprice");
-        const ptype = detectPropertyType(addr);
-        const muni = extractMunicipality(addr);
-        return `<div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <span style="background:var(--accent-light);color:var(--accent);padding:2px 6px;border-radius:4px;font-weight:500;white-space:nowrap;">MLS ${mls}</span>
-          <span style="flex:1;">${owner}</span>
-          <span style="background:${ptype==='condo'?'#EEEDFE':'#EAF3DE'};color:${ptype==='condo'?'#3C3489':'#2D6A4F'};padding:2px 6px;border-radius:4px;font-size:11px;">${ptype==='condo'?'🏢':'🏠'} ${ptype}</span>
-          <span style="color:var(--text-3);font-size:11px;">📍${muni}</span>
-          <span style="color:var(--text-3);">$${Number(price).toLocaleString("fr-CA")}</span>
-        </div>`;
-      }).join("");
-      document.getElementById("csvPreviewLabel").textContent = parsedCSVRows.length + " prospect(s) ready to import";
-      document.getElementById("csvPreviewList").innerHTML = preview;
-      document.getElementById("csvPreview").style.display = "block";
-      document.getElementById("importBtn").style.display = "block";
-    } catch(err) { showToast("Error reading CSV: " + err.message); }
-  };
-  reader.readAsText(file);
-};
-
-function parseCSV(text) {
-  const rows = []; let row = []; let cell = ""; let inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === '"' && inQ && text[i+1] === '"') { cell += '"'; i++; }
-    else if (ch === '"') { inQ = !inQ; }
-    else if (ch === ',' && !inQ) { row.push(cell); cell = ""; }
-    else if ((ch === '\n' || ch === '\r') && !inQ) {
-      if (ch === '\r' && text[i+1] === '\n') i++;
-      row.push(cell); rows.push(row); row = []; cell = "";
-    } else { cell += ch; }
-  }
-  if (cell || row.length) { row.push(cell); rows.push(row); }
-  return rows;
-}
-
-function parseOwnerFullAddress(full) {
-  if (!full) return { street: "", city: "", postal: "" };
-  const postalMatch = full.match(/([A-Z]\d[A-Z]\s*\d[A-Z]\d)\s*$/i);
-  const postal = postalMatch ? postalMatch[1].trim() : "";
-  const withoutPostal = postalMatch ? full.slice(0, postalMatch.index).trim() : full;
-  const cityMatch = withoutPostal.match(/,\s*([^,]+)$/);
-  const city = cityMatch ? cityMatch[1].trim() : "";
-  const street = cityMatch ? withoutPostal.slice(0, cityMatch.index).trim() : withoutPostal;
-  return { street, city, postal };
-}
-
-window.runBulkImport = async function() {
-  const btn = document.getElementById("importBtn");
-  try {
-    if (btn) { btn.textContent = "Importing..."; btn.disabled = true; }
-    const parsedCSVRows = window._csvRows || [];
-    if (!parsedCSVRows || parsedCSVRows.length === 0) {
-      showToast("No data to import — please upload a CSV first");
-      if (btn) { btn.textContent = "Import All"; btn.disabled = false; }
-      return;
-    }
-    const headers = window._csvHeaders || [];
-    const isAlt = headers.includes("mls#") || headers.includes("owner 1 full address");
-    const get = (row, col) => { const i = headers.indexOf(col); return i >= 0 ? (row[i]||"").trim() : ""; };
-    let imported = 0; let failed = 0;
-    for (const row of parsedCSVRows) {
-      try {
-        let mls, status, listingAddress, contractStart, expiry, lastPrice, origPrice, prevPrice, agency, broker, brokerPhone, owners;
-        if (isAlt) {
-          mls = get(row,"mls#");
-          status = get(row,"status") || "Expiré";
-          listingAddress = get(row,"listing address");
-          contractStart = get(row,"contract start date");
-          expiry = get(row,"expiry date");
-          lastPrice = Number(get(row,"last price")) || 0;
-          origPrice = Number(get(row,"original price")) || 0;
-          prevPrice = get(row,"previous price") ? Number(get(row,"previous price")) : null;
-          agency = ""; broker = ""; brokerPhone = "";
-          const o1name = get(row,"owner 1 name");
-          const o1addr = parseOwnerFullAddress(get(row,"owner 1 full address"));
-          owners = o1name ? [{ name: o1name, street: o1addr.street, city: o1addr.city, postal: o1addr.postal }] : [];
-          const o2name = get(row,"owner 2 name");
-          if (o2name) {
-            const o2addr = parseOwnerFullAddress(get(row,"owner 2 full address") || "");
-            owners.push({ name: o2name, street: o2addr.street, city: o2addr.city, postal: o2addr.postal });
-          }
-        } else {
-          mls = get(row,"mls");
-          status = get(row,"status") || "Expiré";
-          listingAddress = get(row,"listingaddress");
-          contractStart = get(row,"contractstart");
-          expiry = get(row,"expiry");
-          lastPrice = Number(get(row,"lastprice")) || 0;
-          origPrice = Number(get(row,"origprice")) || 0;
-          prevPrice = get(row,"prevprice") ? Number(get(row,"prevprice")) : null;
-          agency = get(row,"agency"); broker = get(row,"broker"); brokerPhone = get(row,"brokerphone");
-          owners = [{ name: get(row,"owner1name"), street: get(row,"owner1street"), city: get(row,"owner1city"), postal: get(row,"owner1postal") }];
-          if (get(row,"owner2name")) owners.push({ name: get(row,"owner2name"), street: get(row,"owner2street"), city: get(row,"owner2city"), postal: get(row,"owner2postal") });
-        }
-        if (!mls || !owners.length || !owners[0].name) { failed++; continue; }
-        await addDoc(collection(db,"prospects"), {
-          mls, status, listingAddress, contractStart, expiry,
-          lastPrice, origPrice, prevPrice, agency, broker, brokerPhone,
-          owners, mail:["","","",""], visits:[],
-          createdAt:serverTimestamp(), createdBy:currentUser.uid
-        });
-        imported++;
-      } catch(rowErr) { console.error("Row error:", rowErr); failed++; }
-    }
-    closeAllModals();
-    showToast(`Imported ${imported} prospect(s)${failed ? ` · ${failed} failed` : ""}`);
-    setTimeout(() => {
-      const dups = getDupProspects();
-      if (dups.length > 0) showToast(`⚠ ${dups.length} potential duplicate${dups.length !== 1 ? "s" : ""} detected`);
-    }, 2000);
-  } catch(err) {
-    console.error("Import error:", err);
-    showToast("Import error: " + err.message);
-    if (btn) { btn.textContent = "Import All"; btn.disabled = false; }
-  }
-};
-
-window.saveNewProspect = async function () {
-  const g = id => document.getElementById(id)?.value?.trim();
-  const mls = g("ap_mls"); const o1name = g("ap_o1name");
-  if (!mls || !o1name) {
-    const e = document.getElementById("ap_error");
-    e.textContent = "MLS # and at least one owner name are required.";
-    e.style.display = "block"; return;
-  }
-  const owners = [{ name: o1name, street: g("ap_o1street"), city: g("ap_o1city"), postal: g("ap_o1postal") }];
-  if (g("ap_o2name")) owners.push({ name: g("ap_o2name"), street: g("ap_o2street"), city: g("ap_o2city"), postal: g("ap_o2postal") });
-  await addDoc(collection(db, "prospects"), {
-    mls, status: g("ap_status"), listingAddress: g("ap_listingAddr"),
-    contractStart: g("ap_start"), expiry: g("ap_expiry"),
-    lastPrice: Number(g("ap_price")) || 0, origPrice: Number(g("ap_origPrice")) || 0,
-    prevPrice: g("ap_prevPrice") ? Number(g("ap_prevPrice")) : null,
-    agency: g("ap_agency"), broker: g("ap_broker"), brokerPhone: g("ap_phone"),
-    owners, mail: ["","","",""], visits: [],
-    createdAt: serverTimestamp(), createdBy: currentUser.uid
-  });
-  closeAllModals();
-  showToast("Prospect added successfully");
-};
-
-window.deleteProspect = async function (id) {
-  if (!confirm("Delete this prospect? This cannot be undone.")) return;
-  await deleteDoc(doc(db, "prospects", id));
-  closeAllModals();
-  showToast("Prospect deleted");
-};
-
-window.startExportMode = function () {
-  exportMode = true; selectedMLS.clear();
-  document.getElementById("selBanner").classList.add("active");
-  document.getElementById("exportModeBtn").style.display = "none";
-  renderProspects();
-};
-
-window.cancelExportMode = function () {
-  exportMode = false; selectedMLS.clear();
-  document.getElementById("selBanner").classList.remove("active");
-  document.getElementById("exportModeBtn").style.display = "";
-  renderProspects();
-};
-
-window.toggleSelectProspect = function (mls) {
-  if (selectedMLS.has(mls)) selectedMLS.delete(mls);
-  else selectedMLS.add(mls);
-  updateSelBanner(); renderProspects();
-};
-
-window.selectAllProspects = function () {
-  allProspects.forEach(p => selectedMLS.add(p.mls));
-  updateSelBanner(); renderProspects();
-};
-
-window.clearSelection = function () {
-  selectedMLS.clear(); updateSelBanner(); renderProspects();
-};
-
-function updateSelBanner() {
-  const n = selectedMLS.size;
-  document.getElementById("selText").textContent = `${n} prospect${n !== 1 ? "s" : ""} selected`;
-  document.getElementById("confirmExportBtn").disabled = n === 0;
-}
-
-window.showExportConfirm = function () {
-  const sel = allProspects.filter(p => selectedMLS.has(p.mls));
-  let num = 0;
-  const items = sel.map(p => (p.owners || []).map(o => {
-    num++;
-    return `<div class="export-item"><div class="export-num">${num}</div>
-      <div><div class="export-item-name">${o.name}</div>
-      <div class="export-item-addr">${o.street}, ${o.city} ${o.postal}</div></div></div>`;
-  }).join("")).join("");
-  const totalLabels = sel.reduce((s, p) => s + (p.owners || []).length, 0);
-  document.getElementById("exportModalContent").innerHTML = `
-    <div class="modal-header"><div class="modal-title">Confirm export</div>
-      <button class="close-x" onclick="closeAllModals()">×</button></div>
-    <p style="font-size:13px;color:var(--text-2);">${sel.length} prospect${sel.length !== 1 ? "s" : ""} · ${totalLabels} mailing label${totalLabels !== 1 ? "s" : ""}</p>
-    <div class="export-list">${items}</div>
-    <div class="modal-actions">
-      <button class="btn-secondary" onclick="closeAllModals()">Back</button>
-      <button class="btn-confirm" onclick="doExport()">Download CSV ↓</button>
-    </div>`;
-  openModal("exportModal");
-};
-
-window.doExport = function () {
-  const sel = allProspects.filter(p => selectedMLS.has(p.mls));
-  const rows = [["Name","Street","City","Province","Postal Code"]];
-  sel.forEach(p => {
-    (p.owners || []).forEach(o => {
-      if (!o.name) return;
-      rows.push([o.name, o.street||"", o.city?.replace(/ \(.*\)/,"").trim()||"", "QC", o.postal||""]);
-    });
-  });
-  const csv = rows.map(r => r.map(v => `"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob(["\uFEFF"+csv], {type:"text/csv;charset=utf-8;"}));
-  a.download = "mailing_labels.csv"; a.click();
-  closeAllModals(); cancelExportMode();
-  showToast("Export downloaded");
-};
+window.openAddProspect=function(tab){tab=tab||"single";document.getElementById("addProspectContent").innerHTML=`<div class="modal-header"><div class="modal-title">Add Prospects</div><button class="close-x" onclick="closeAllModals()">×</button></div><div style="display:flex;gap:0;margin-bottom:20px;border:1px solid var(--border-med);border-radius:var(--radius);overflow:hidden;"><button onclick="openAddProspect('single')" style="flex:1;padding:9px;font-size:13px;font-family:var(--font);border:none;cursor:pointer;background:${tab==='single'?'var(--accent)':'var(--surface)'};color:${tab==='single'?'#fff':'var(--text-2)'};">Single Entry</button><button onclick="openAddProspect('bulk')" style="flex:1;padding:9px;font-size:13px;font-family:var(--font);border:none;border-left:1px solid var(--border-med);cursor:pointer;background:${tab==='bulk'?'var(--accent)':'var(--surface)'};color:${tab==='bulk'?'#fff':'var(--text-2)'};">Bulk CSV Import</button></div>${tab==='single'?singleEntryForm():bulkImportForm()}`;openModal("addProspectModal");};
+function singleEntryForm(){return`<div class="form-group"><label>MLS #</label><input type="text" id="ap_mls" /></div><div class="form-group"><label>Status</label><select id="ap_status"><option value="Expiré">Expiré</option><option value="Annulé">Annulé</option></select></div><div class="form-group"><label>Listing Address</label><input type="text" id="ap_listingAddr" /></div><div class="form-group"><label>Contract Start</label><input type="date" id="ap_start" /></div><div class="form-group"><label>Expiry Date</label><input type="date" id="ap_expiry" /></div><div class="form-group"><label>Last Price ($)</label><input type="number" id="ap_price" /></div><div class="form-group"><label>Original Price ($)</label><input type="number" id="ap_origPrice" /></div><div class="form-group"><label>Previous Price ($)</label><input type="number" id="ap_prevPrice" /></div><div class="form-group"><label>Agency</label><input type="text" id="ap_agency" /></div><div class="form-group"><label>Broker Name</label><input type="text" id="ap_broker" /></div><div class="form-group"><label>Broker Phone</label><input type="text" id="ap_phone" /></div><hr class="divider" /><p style="font-size:13px;font-weight:500;margin-bottom:12px;">Owner 1 — Mailing Address</p><div class="form-group"><label>Owner Name</label><input type="text" id="ap_o1name" /></div><div class="form-group"><label>Street</label><input type="text" id="ap_o1street" /></div><div class="form-group"><label>City</label><input type="text" id="ap_o1city" /></div><div class="form-group"><label>Postal Code</label><input type="text" id="ap_o1postal" /></div><hr class="divider" /><p style="font-size:13px;font-weight:500;margin-bottom:12px;">Owner 2 (optional)</p><div class="form-group"><label>Owner Name</label><input type="text" id="ap_o2name" /></div><div class="form-group"><label>Street</label><input type="text" id="ap_o2street" /></div><div class="form-group"><label>City</label><input type="text" id="ap_o2city" /></div><div class="form-group"><label>Postal Code</label><input type="text" id="ap_o2postal" /></div><div id="ap_error" class="error-msg" style="display:none;margin-top:8px;"></div><div class="modal-actions"><button class="btn-secondary" onclick="closeAllModals()">Cancel</button><button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="saveNewProspect()">Save Prospect</button></div>`;}
+function bulkImportForm(){return`<div style="background:var(--accent-light);border-radius:var(--radius);padding:14px;margin-bottom:16px;"><p style="font-size:13px;font-weight:500;color:var(--accent);margin-bottom:6px;">How it works</p><p style="font-size:12px;color:var(--accent);line-height:1.6;">1. Download the CSV template below<br>2. Fill in your prospects (one per row)<br>3. Save as CSV and upload here</p></div><div style="margin-bottom:16px;"><button class="btn-secondary" style="width:100%;" onclick="downloadTemplate()">↓ Download CSV Template</button></div><div class="form-group"><label>Upload your filled CSV</label><input type="file" id="csvFileInput" accept=".csv" onchange="previewCSV(this)" style="padding:8px;background:var(--bg);" /></div><div id="csvPreview" style="display:none;margin-bottom:16px;"><div style="font-size:12px;font-weight:500;color:var(--text-2);margin-bottom:8px;" id="csvPreviewLabel"></div><div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);" id="csvPreviewList"></div></div><div id="ap_error" class="error-msg" style="display:none;margin-top:8px;"></div><div class="modal-actions"><button class="btn-secondary" onclick="closeAllModals()">Cancel</button><button class="btn-primary" id="importBtn" style="width:auto;padding:9px 20px;display:none;" onclick="runBulkImport()">Import All</button></div>`;}
+window.downloadTemplate=function(){const headers="mls,status,listingAddress,contractStart,expiry,lastPrice,origPrice,prevPrice,agency,broker,brokerPhone,owner1Name,owner1Street,owner1City,owner1Postal,owner2Name,owner2Street,owner2City,owner2Postal";const example='9183921,Expiré,"10200 Boul. de Acadie, app. 814, Montréal (Ahuntsic-Cartierville)",2025-09-17,2026-03-31,540000,540000,,LES IMMEUBLES HOME-PRO,Amir Keryakes,514-943-2647,Medhat Azer,10200 Acadie app. 814,Montreal,H4N 3L3,,,,';const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([headers+"\n"+example],{type:"text/csv"}));a.download="prospects-template.csv";a.click();};
+let parsedCSVRows=[];window._csvRows=[];window._csvHeaders=[];
+window.previewCSV=function(input){const file=input.files[0];if(!file)return;const reader=new FileReader();reader.onload=function(e){try{const rows=parseCSV(e.target.result);if(rows.length<2){showToast("CSV appears empty");return;}const headers=rows[0].map(h=>h.trim().toLowerCase());window._csvHeaders=headers;parsedCSVRows=rows.slice(1).filter(r=>r.some(c=>c.trim()));window._csvRows=parsedCSVRows;const isAlt=headers.includes("mls#")||headers.includes("owner 1 full address");const get=(row,col)=>{const idx=headers.indexOf(col);return idx>=0?(row[idx]||"").trim():"";};const preview=parsedCSVRows.map(row=>{const mls=isAlt?get(row,"mls#"):get(row,"mls");const owner=isAlt?get(row,"owner 1 name"):get(row,"owner1name");const addr=isAlt?get(row,"listing address"):get(row,"listingaddress");const price=isAlt?get(row,"last price"):get(row,"lastprice");const ptype=detectPropertyType(addr);const muni=extractMunicipality(addr);return`<div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><span style="background:var(--accent-light);color:var(--accent);padding:2px 6px;border-radius:4px;font-weight:500;white-space:nowrap;">MLS ${mls}</span><span style="flex:1;">${owner}</span><span style="background:${ptype==='condo'?'#EEEDFE':'#EAF3DE'};color:${ptype==='condo'?'#3C3489':'#2D6A4F'};padding:2px 6px;border-radius:4px;font-size:11px;">${ptype==='condo'?'🏢':'🏠'} ${ptype}</span><span style="color:var(--text-3);font-size:11px;">📍${muni}</span><span style="color:var(--text-3);">$${Number(price).toLocaleString("fr-CA")}</span></div>`;}).join("");document.getElementById("csvPreviewLabel").textContent=parsedCSVRows.length+" prospect(s) ready to import";document.getElementById("csvPreviewList").innerHTML=preview;document.getElementById("csvPreview").style.display="block";document.getElementById("importBtn").style.display="block";}catch(err){showToast("Error reading CSV: "+err.message);}};reader.readAsText(file);};
+function parseCSV(text){const rows=[];let row=[];let cell="";let inQ=false;for(let i=0;i<text.length;i++){const ch=text[i];if(ch==='"'&&inQ&&text[i+1]==='"'){cell+='"';i++;}else if(ch==='"'){inQ=!inQ;}else if(ch===','&&!inQ){row.push(cell);cell="";}else if((ch==='\n'||ch==='\r')&&!inQ){if(ch==='\r'&&text[i+1]==='\n')i++;row.push(cell);rows.push(row);row=[];cell="";}else{cell+=ch;}}if(cell||row.length){row.push(cell);rows.push(row);}return rows;}
+function parseOwnerFullAddress(full){if(!full)return{street:"",city:"",postal:""};const postalMatch=full.match(/([A-Z]\d[A-Z]\s*\d[A-Z]\d)\s*$/i);const postal=postalMatch?postalMatch[1].trim():"";const withoutPostal=postalMatch?full.slice(0,postalMatch.index).trim():full;const cityMatch=withoutPostal.match(/,\s*([^,]+)$/);const city=cityMatch?cityMatch[1].trim():"";const street=cityMatch?withoutPostal.slice(0,cityMatch.index).trim():withoutPostal;return{street,city,postal};}
+window.runBulkImport=async function(){const btn=document.getElementById("importBtn");try{if(btn){btn.textContent="Importing...";btn.disabled=true;}const rows=window._csvRows||[];if(!rows.length){showToast("No data to import");if(btn){btn.textContent="Import All";btn.disabled=false;}return;}const headers=window._csvHeaders||[];const isAlt=headers.includes("mls#")||headers.includes("owner 1 full address");const get=(row,col)=>{const i=headers.indexOf(col);return i>=0?(row[i]||"").trim():"";};let imported=0;let failed=0;for(const row of rows){try{let mls,status,listingAddress,contractStart,expiry,lastPrice,origPrice,prevPrice,agency,broker,brokerPhone,owners;if(isAlt){mls=get(row,"mls#");status=get(row,"status")||"Expiré";listingAddress=get(row,"listing address");contractStart=get(row,"contract start date");expiry=get(row,"expiry date");lastPrice=Number(get(row,"last price"))||0;origPrice=Number(get(row,"original price"))||0;prevPrice=get(row,"previous price")?Number(get(row,"previous price")):null;agency="";broker="";brokerPhone="";const o1name=get(row,"owner 1 name");const o1addr=parseOwnerFullAddress(get(row,"owner 1 full address"));owners=o1name?[{name:o1name,street:o1addr.street,city:o1addr.city,postal:o1addr.postal}]:[];const o2name=get(row,"owner 2 name");if(o2name){const o2addr=parseOwnerFullAddress(get(row,"owner 2 full address")||"");owners.push({name:o2name,street:o2addr.street,city:o2addr.city,postal:o2addr.postal});}}else{mls=get(row,"mls");status=get(row,"status")||"Expiré";listingAddress=get(row,"listingaddress");contractStart=get(row,"contractstart");expiry=get(row,"expiry");lastPrice=Number(get(row,"lastprice"))||0;origPrice=Number(get(row,"origprice"))||0;prevPrice=get(row,"prevprice")?Number(get(row,"prevprice")):null;agency=get(row,"agency");broker=get(row,"broker");brokerPhone=get(row,"brokerphone");owners=[{name:get(row,"owner1name"),street:get(row,"owner1street"),city:get(row,"owner1city"),postal:get(row,"owner1postal")}];if(get(row,"owner2name"))owners.push({name:get(row,"owner2name"),street:get(row,"owner2street"),city:get(row,"owner2city"),postal:get(row,"owner2postal")});}if(!mls||!owners.length||!owners[0].name){failed++;continue;}await addDoc(collection(db,"prospects"),{mls,status,listingAddress,contractStart,expiry,lastPrice,origPrice,prevPrice,agency,broker,brokerPhone,owners,mail:["","","",""],visits:[],createdAt:serverTimestamp(),createdBy:currentUser.uid});imported++;}catch(e){failed++;}}closeAllModals();showToast(`Imported ${imported} prospect(s)${failed?` · ${failed} failed`:""}`);}catch(err){showToast("Import error: "+err.message);if(btn){btn.textContent="Import All";btn.disabled=false;}}};
+window.saveNewProspect=async function(){const g=id=>document.getElementById(id)?.value?.trim();const mls=g("ap_mls");const o1name=g("ap_o1name");if(!mls||!o1name){const e=document.getElementById("ap_error");e.textContent="MLS # and at least one owner name are required.";e.style.display="block";return;}const owners=[{name:o1name,street:g("ap_o1street"),city:g("ap_o1city"),postal:g("ap_o1postal")}];if(g("ap_o2name"))owners.push({name:g("ap_o2name"),street:g("ap_o2street"),city:g("ap_o2city"),postal:g("ap_o2postal")});await addDoc(collection(db,"prospects"),{mls,status:g("ap_status"),listingAddress:g("ap_listingAddr"),contractStart:g("ap_start"),expiry:g("ap_expiry"),lastPrice:Number(g("ap_price"))||0,origPrice:Number(g("ap_origPrice"))||0,prevPrice:g("ap_prevPrice")?Number(g("ap_prevPrice")):null,agency:g("ap_agency"),broker:g("ap_broker"),brokerPhone:g("ap_phone"),owners,mail:["","","",""],visits:[],createdAt:serverTimestamp(),createdBy:currentUser.uid});closeAllModals();showToast("Prospect added successfully");};
+window.deleteProspect=async function(id){if(!confirm("Delete this prospect? This cannot be undone."))return;await deleteDoc(doc(db,"prospects",id));closeAllModals();showToast("Prospect deleted");};
+window.startExportMode=function(){exportMode=true;selectedMLS.clear();document.getElementById("selBanner").classList.add("active");document.getElementById("exportModeBtn").style.display="none";renderProspects();};
+window.cancelExportMode=function(){exportMode=false;selectedMLS.clear();document.getElementById("selBanner").classList.remove("active");document.getElementById("exportModeBtn").style.display="";renderProspects();};
+window.toggleSelectProspect=function(mls){if(selectedMLS.has(mls))selectedMLS.delete(mls);else selectedMLS.add(mls);updateSelBanner();renderProspects();};
+window.selectAllProspects=function(){allProspects.forEach(p=>selectedMLS.add(p.mls));updateSelBanner();renderProspects();};
+window.clearSelection=function(){selectedMLS.clear();updateSelBanner();renderProspects();};
+function updateSelBanner(){const n=selectedMLS.size;document.getElementById("selText").textContent=`${n} prospect${n!==1?"s":""} selected`;document.getElementById("confirmExportBtn").disabled=n===0;}
+window.showExportConfirm=function(){const sel=allProspects.filter(p=>selectedMLS.has(p.mls));let num=0;const items=sel.map(p=>(p.owners||[]).map(o=>{num++;return`<div class="export-item"><div class="export-num">${num}</div><div><div class="export-item-name">${o.name}</div><div class="export-item-addr">${o.street}, ${o.city} ${o.postal}</div></div></div>`;}).join("")).join("");const totalLabels=sel.reduce((s,p)=>s+(p.owners||[]).length,0);document.getElementById("exportModalContent").innerHTML=`<div class="modal-header"><div class="modal-title">Confirm export</div><button class="close-x" onclick="closeAllModals()">×</button></div><p style="font-size:13px;color:var(--text-2);">${sel.length} prospect${sel.length!==1?"s":""} · ${totalLabels} mailing label${totalLabels!==1?"s":""}</p><div class="export-list">${items}</div><div class="modal-actions"><button class="btn-secondary" onclick="closeAllModals()">Back</button><button class="btn-confirm" onclick="doExport()">Download CSV ↓</button></div>`;openModal("exportModal");};
+window.doExport=function(){const sel=allProspects.filter(p=>selectedMLS.has(p.mls));const rows=[["Name","Street","City","Province","Postal Code"]];sel.forEach(p=>{(p.owners||[]).forEach(o=>{if(!o.name)return;rows.push([o.name,o.street||"",o.city?.replace(/ \(.*\)/,"").trim()||"","QC",o.postal||""]);});});const csv=rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"}));a.download="mailing_labels.csv";a.click();closeAllModals();cancelExportMode();showToast("Export downloaded");};
 
 async function renderDashboard() {
-  const el = document.getElementById("dashboardContent");
-  if (!el) return;
-  const totalProspects = allProspects.length;
-  const condos = allProspects.filter(p => detectPropertyType(p.listingAddress) === "condo").length;
-  const houses = allProspects.filter(p => detectPropertyType(p.listingAddress) === "house").length;
-  const totalMailings = allProspects.reduce((s, p) => s + (p.mail || []).filter(Boolean).length, 0);
-  const totalVisits = allProspects.reduce((s, p) => s + (p.visits || []).length, 0);
-  const evalsBooked = allProspects.filter(p => (p.visits || []).some(v => v.evalBooked === "yes")).length;
-  const contacted = allProspects.filter(p => (p.visits || []).some(v => v.contact === "yes")).length;
-  const dupCount = getDupProspects().length;
-  let activityHtml = '<p style="font-size:13px;color:var(--text-3);">No activity yet.</p>';
-  try {
-    const actSnap = await getDocs(query(collection(db, "activity"), orderBy("timestamp", "desc")));
-    const acts = actSnap.docs.slice(0, 15).map(d => d.data());
-    if (acts.length) {
-      activityHtml = acts.map(a => {
-        const prospect = allProspects.find(p => p.id === a.prospectId);
-        const pName = prospect ? (prospect.owners?.[0]?.name || "MLS #" + prospect.mls) : "Unknown";
-        const ts = a.timestamp?.toDate ? a.timestamp.toDate().toLocaleDateString("en-CA") : "";
-        return `<div class="activity-item"><div class="activity-dot"></div>
-          <div><div class="activity-text"><strong>${a.agentName || "Agent"}</strong> — ${a.action} on <em>${pName}</em></div>
-          <div class="activity-time">${ts}</div></div></div>`;
-      }).join("");
-    }
-  } catch(e) {}
-  const agentStats = {};
-  allProspects.forEach(p => {
-    (p.visits || []).forEach(v => {
-      const aid = v.agentId || "unknown"; const aname = v.agentName || "Unknown";
-      if (!agentStats[aid]) agentStats[aid] = { name: aname, visits: 0, contacts: 0, evals: 0 };
-      agentStats[aid].visits++;
-      if (v.contact === "yes") agentStats[aid].contacts++;
-      if (v.evalBooked === "yes") agentStats[aid].evals++;
-    });
-  });
-  const agentCardsHtml = Object.values(agentStats).length === 0
-    ? '<p style="font-size:13px;color:var(--text-3);">No visit activity logged yet.</p>'
-    : Object.values(agentStats).map(a => `
-      <div class="agent-card">
-        <div class="agent-header"><div class="agent-avatar">${a.name.slice(0,2).toUpperCase()}</div>
-        <div><div class="agent-name">${a.name}</div></div></div>
-        <div class="agent-stats">
-          <div class="agent-stat"><div class="agent-stat-num">${a.visits}</div><div class="agent-stat-lbl">Visits</div></div>
-          <div class="agent-stat"><div class="agent-stat-num">${a.contacts}</div><div class="agent-stat-lbl">Contacts</div></div>
-          <div class="agent-stat"><div class="agent-stat-num">${a.evals}</div><div class="agent-stat-lbl">Evals</div></div>
-        </div></div>`).join("");
-  el.innerHTML = `
-    <div class="stats-grid">
-      <div class="stat-card"><div class="stat-label">Total prospects</div><div class="stat-value">${totalProspects}</div></div>
-      <div class="stat-card"><div class="stat-label">🏢 Condos</div><div class="stat-value">${condos}</div></div>
-      <div class="stat-card"><div class="stat-label">🏠 Houses</div><div class="stat-value">${houses}</div></div>
-      <div class="stat-card"><div class="stat-label">Mailings sent</div><div class="stat-value">${totalMailings}</div></div>
-      <div class="stat-card"><div class="stat-label">Door visits</div><div class="stat-value">${totalVisits}</div></div>
-      <div class="stat-card"><div class="stat-label">Contacts made</div><div class="stat-value">${contacted}</div></div>
-      <div class="stat-card"><div class="stat-label">Evals booked</div><div class="stat-value">${evalsBooked}</div></div>
-      ${dupCount > 0 ? `<div class="stat-card" style="border-color:#E9A000;background:#FDF3E7;cursor:pointer;" onclick="switchView('prospects',null);startDupReview()"><div class="stat-label" style="color:#7A4F1D;">⚠ Duplicates</div><div class="stat-value" style="color:#7A4F1D;">${dupCount}</div><div class="stat-sub" style="color:#7A4F1D;">Click to review</div></div>` : ""}
-    </div>
-    <div class="section-title" style="margin-bottom:12px;">Agent activity</div>
-    ${agentCardsHtml}
-    <div class="section-title" style="margin:20px 0 12px;">Recent activity log</div>
-    <div class="activity-list">${activityHtml}</div>`;
+  const el=document.getElementById("dashboardContent");if(!el)return;
+  const totalProspects=allProspects.length;const condos=allProspects.filter(p=>detectPropertyType(p.listingAddress)==="condo").length;const houses=allProspects.filter(p=>detectPropertyType(p.listingAddress)==="house").length;
+  const totalMailings=allProspects.reduce((s,p)=>s+(p.mail||[]).filter(Boolean).length,0);const totalVisits=allProspects.reduce((s,p)=>s+(p.visits||[]).length,0);
+  const evalsBooked=allProspects.filter(p=>(p.visits||[]).some(v=>v.evalBooked==="yes")).length;const contacted=allProspects.filter(p=>(p.visits||[]).some(v=>v.contact==="yes")).length;
+  const dupCount=getDupProspects().length;
+  const activeOpsL=opsListings.filter(l=>["offre","ferme"].includes(l.status)).length;
+  const activeOpsP=opsPurchases.length;
+  let activityHtml='<p style="font-size:13px;color:var(--text-3);">No activity yet.</p>';
+  try{const actSnap=await getDocs(query(collection(db,"activity"),orderBy("timestamp","desc")));const acts=actSnap.docs.slice(0,15).map(d=>d.data());if(acts.length)activityHtml=acts.map(a=>{const prospect=allProspects.find(p=>p.id===a.prospectId);const pName=prospect?(prospect.owners?.[0]?.name||"MLS #"+prospect.mls):"Unknown";const ts=a.timestamp?.toDate?a.timestamp.toDate().toLocaleDateString("en-CA"):"";return`<div class="activity-item"><div class="activity-dot"></div><div><div class="activity-text"><strong>${a.agentName||"Agent"}</strong> — ${a.action} on <em>${pName}</em></div><div class="activity-time">${ts}</div></div></div>`;}).join("");}catch(e){}
+  const agentStats={};allProspects.forEach(p=>{(p.visits||[]).forEach(v=>{const aid=v.agentId||"unknown";const aname=v.agentName||"Unknown";if(!agentStats[aid])agentStats[aid]={name:aname,visits:0,contacts:0,evals:0};agentStats[aid].visits++;if(v.contact==="yes")agentStats[aid].contacts++;if(v.evalBooked==="yes")agentStats[aid].evals++;});});
+  const agentCardsHtml=Object.values(agentStats).length===0?'<p style="font-size:13px;color:var(--text-3);">No visit activity logged yet.</p>':Object.values(agentStats).map(a=>`<div class="agent-card"><div class="agent-header"><div class="agent-avatar">${a.name.slice(0,2).toUpperCase()}</div><div><div class="agent-name">${a.name}</div></div></div><div class="agent-stats"><div class="agent-stat"><div class="agent-stat-num">${a.visits}</div><div class="agent-stat-lbl">Visits</div></div><div class="agent-stat"><div class="agent-stat-num">${a.contacts}</div><div class="agent-stat-lbl">Contacts</div></div><div class="agent-stat"><div class="agent-stat-num">${a.evals}</div><div class="agent-stat-lbl">Evals</div></div></div></div>`).join("");
+  el.innerHTML=`<div class="stats-grid"><div class="stat-card"><div class="stat-label">Total prospects</div><div class="stat-value">${totalProspects}</div></div><div class="stat-card"><div class="stat-label">🏢 Condos</div><div class="stat-value">${condos}</div></div><div class="stat-card"><div class="stat-label">🏠 Houses</div><div class="stat-value">${houses}</div></div><div class="stat-card"><div class="stat-label">Mailings sent</div><div class="stat-value">${totalMailings}</div></div><div class="stat-card"><div class="stat-label">Door visits</div><div class="stat-value">${totalVisits}</div></div><div class="stat-card"><div class="stat-label">Contacts made</div><div class="stat-value">${contacted}</div></div><div class="stat-card"><div class="stat-label">Evals booked</div><div class="stat-value">${evalsBooked}</div></div><div class="stat-card" style="border-color:#0C2B5E;background:#E8EDF7;"><div class="stat-label" style="color:#0C2B5E;">◩ Ops — Dossiers actifs</div><div class="stat-value" style="color:#0C2B5E;">${activeOpsL+activeOpsP}</div><div class="stat-sub" style="color:#0C2B5E;">${activeOpsL} inscriptions · ${activeOpsP} achats</div></div>${dupCount>0?`<div class="stat-card" style="border-color:#E9A000;background:#FDF3E7;cursor:pointer;" onclick="switchView('prospects',null);startDupReview()"><div class="stat-label" style="color:#7A4F1D;">⚠ Duplicates</div><div class="stat-value" style="color:#7A4F1D;">${dupCount}</div><div class="stat-sub" style="color:#7A4F1D;">Click to review</div></div>`:""}</div><div class="section-title" style="margin-bottom:12px;">Agent activity</div>${agentCardsHtml}<div class="section-title" style="margin:20px 0 12px;">Recent activity log</div><div class="activity-list">${activityHtml}</div>`;
 }
-
-async function loadAllUsers() {
-  const snap = await getDocs(collection(db, "users"));
-  allUsers = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
-}
-
-async function renderAdmin() {
-  await loadAllUsers();
-  const el = document.getElementById("adminContent");
-  const usersHtml = allUsers.length === 0
-    ? '<p style="font-size:13px;color:var(--text-3);">No users yet.</p>'
-    : allUsers.map(u => `
-      <div class="admin-card">
-        <div class="agent-avatar">${(u.name || u.email || "?").slice(0,2).toUpperCase()}</div>
-        <div class="admin-card-info"><div class="admin-card-name">${u.name || "—"}</div>
-        <div class="admin-card-email">${u.email || ""}</div></div>
-        <span class="badge ${u.role === 'admin' ? 'badge-blue' : 'badge-gray'} admin-card-role">${u.role || "agent"}</span>
-      </div>`).join("");
-  el.innerHTML = `
-    <div class="section-title" style="margin-bottom:12px;">Team members (${allUsers.length})</div>
-    ${usersHtml}
-    <div style="margin-top:24px;padding:16px;background:var(--surface);border-radius:var(--radius-lg);border:1px solid var(--border);">
-      <div class="section-title" style="margin-bottom:8px;">How to add agents</div>
-      <p style="font-size:13px;color:var(--text-2);line-height:1.6;">
-        1. Firebase → Authentication → Users → Add user<br>
-        2. Copy UID → Firestore → users collection → Add document<br>
-        3. Document ID = UID, fields: <code>name</code>, <code>email</code>, <code>role: "agent"</code>
-      </p>
-    </div>`;
-}
-
-window.openInviteAgent = function () {
-  document.getElementById("inviteModalContent").innerHTML = `
-    <div class="modal-header"><div class="modal-title">Add Agent</div>
-      <button class="close-x" onclick="closeAllModals()">×</button></div>
-    <ol style="font-size:13px;color:var(--text-2);line-height:2;padding-left:18px;">
-      <li>Go to <strong>Authentication → Users → Add user</strong></li>
-      <li>Enter the agent's email and a temporary password</li>
-      <li>Copy the UID → Firestore → users collection</li>
-      <li>New document: UID as ID, fields: <code>name</code>, <code>email</code>, <code>role: "agent"</code></li>
-    </ol>
-    <div class="modal-actions">
-      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="closeAllModals()">Got it</button>
-    </div>`;
-  openModal("inviteModal");
-};
-
-function openModal(id) {
-  document.querySelectorAll(".modal").forEach(m => m.classList.remove("active"));
-  document.getElementById(id).classList.add("active");
-  document.getElementById("modalOverlay").classList.add("open");
-}
-
-window.closeAllModals = function (e) {
-  if (e && e.target !== document.getElementById("modalOverlay")) return;
-  document.getElementById("modalOverlay").classList.remove("open");
-  document.querySelectorAll(".modal").forEach(m => m.classList.remove("active"));
-};
-
-function showToast(msg) {
-  let t = document.querySelector(".toast");
-  if (!t) { t = document.createElement("div"); t.className = "toast"; document.body.appendChild(t); }
-  t.textContent = msg; t.classList.add("show");
-  setTimeout(() => t.classList.remove("show"), 2500);
-}
-
-document.addEventListener("click", e => {
-  if (e.target.classList.contains("close-x")) {
-    document.getElementById("modalOverlay").classList.remove("open");
-    document.querySelectorAll(".modal").forEach(m => m.classList.remove("active"));
-  }
-});
+async function loadAllUsers(){const snap=await getDocs(collection(db,"users"));allUsers=snap.docs.map(d=>({uid:d.id,...d.data()}));}
+async function renderAdmin(){await loadAllUsers();const el=document.getElementById("adminContent");const usersHtml=allUsers.length===0?'<p style="font-size:13px;color:var(--text-3);">No users yet.</p>':allUsers.map(u=>`<div class="admin-card"><div class="agent-avatar">${(u.name||u.email||"?").slice(0,2).toUpperCase()}</div><div class="admin-card-info"><div class="admin-card-name">${u.name||"—"}</div><div class="admin-card-email">${u.email||""}</div></div><span class="badge ${u.role==='admin'?'badge-blue':'badge-gray'} admin-card-role">${u.role||"agent"}</span></div>`).join("");el.innerHTML=`<div class="section-title" style="margin-bottom:12px;">Team members (${allUsers.length})</div>${usersHtml}<div style="margin-top:24px;padding:16px;background:var(--surface);border-radius:var(--radius-lg);border:1px solid var(--border);"><div class="section-title" style="margin-bottom:8px;">How to add agents</div><p style="font-size:13px;color:var(--text-2);line-height:1.6;">1. Firebase → Authentication → Users → Add user<br>2. Copy UID → Firestore → users collection → Add document<br>3. Document ID = UID, fields: <code>name</code>, <code>email</code>, <code>role: "agent"</code></p></div>`;}
+window.openInviteAgent=function(){document.getElementById("inviteModalContent").innerHTML=`<div class="modal-header"><div class="modal-title">Add Agent</div><button class="close-x" onclick="closeAllModals()">×</button></div><ol style="font-size:13px;color:var(--text-2);line-height:2;padding-left:18px;"><li>Go to <strong>Authentication → Users → Add user</strong></li><li>Enter the agent's email and a temporary password</li><li>Copy the UID → Firestore → users collection</li><li>New document: UID as ID, fields: <code>name</code>, <code>email</code>, <code>role: "agent"</code></li></ol><div class="modal-actions"><button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="closeAllModals()">Got it</button></div>`;openModal("inviteModal");};
+function openModal(id){document.querySelectorAll(".modal").forEach(m=>m.classList.remove("active"));document.getElementById(id).classList.add("active");document.getElementById("modalOverlay").classList.add("open");}
+window.closeAllModals=function(e){if(e&&e.target!==document.getElementById("modalOverlay"))return;document.getElementById("modalOverlay").classList.remove("open");document.querySelectorAll(".modal").forEach(m=>m.classList.remove("active"));};
+function showToast(msg){let t=document.querySelector(".toast");if(!t){t=document.createElement("div");t.className="toast";document.body.appendChild(t);}t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2500);}
+document.addEventListener("click",e=>{if(e.target.classList.contains("close-x")){document.getElementById("modalOverlay").classList.remove("open");document.querySelectorAll(".modal").forEach(m=>m.classList.remove("active"));}});
