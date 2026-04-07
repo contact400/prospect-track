@@ -413,6 +413,38 @@ window.opsChgStatus = async function(lid, val) {
   await updateDoc(doc(db,"ops_listings",lid),{status:val,updatedAt:serverTimestamp()});
 };
 
+
+window.opsAccepterOffre = function(lid) {
+  const l = opsListings.find(x=>x.id===lid);
+  if (!l) return;
+  document.getElementById("opsModalContent").innerHTML = `
+    <div class="modal-header"><div class="modal-title">Offre reçue</div><button class="close-x" onclick="closeAllModals()">×</button></div>
+    <div class="mbody-ops">
+      <p style="font-size:13px;color:var(--text-2);margin-bottom:16px;">Prix inscrit : <strong>${l.price||"—"}</strong></p>
+      <div class="form-group">
+        <label>Prix de l'offre acceptée ($)</label>
+        <input type="text" id="offre-price" placeholder="ex: 1 050 000" style="font-size:15px;font-weight:500;" />
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeAllModals()">Annuler</button>
+      <button class="btn-primary" style="width:auto;padding:9px 20px;background:#1D9E75;border-color:#1D9E75;" onclick="opsConfirmOffre('${lid}')">Confirmer l'offre</button>
+    </div>`;
+  openModal("opsModal");
+};
+
+window.opsConfirmOffre = async function(lid) {
+  const val = document.getElementById("offre-price").value.trim();
+  if (!val) { showToast("Veuillez entrer le prix de l'offre"); return; }
+  await updateDoc(doc(db,"ops_listings",lid),{
+    status:"offre",
+    offerPrice: val,
+    updatedAt: serverTimestamp()
+  });
+  closeAllModals();
+  showToast("Offre reçue — dossier mis à jour ✓");
+};
+
 window.opsDeleteListing = async function(lid) {
   if (!confirm("Supprimer cette inscription ?")) return;
   await deleteDoc(doc(db,"ops_listings",lid));
@@ -466,6 +498,7 @@ function renderOps() {
       <button class="ops-tab${opsView==="dash"?" active":""}" onclick="opsSetView('dash')">Vue d'ensemble</button>
       <button class="ops-tab${opsView==="listings"?" active":""}" onclick="opsSetView('listings')">Inscriptions <span class="ops-tab-count">${opsListings.length}</span></button>
       <button class="ops-tab${opsView==="purchases"?" active":""}" onclick="opsSetView('purchases')">Achats <span class="ops-tab-count">${opsPurchases.length}</span></button>
+      <button class="ops-tab${opsView==="ventes"?" active":""}" onclick="opsSetView('ventes')">Ventes <span class="ops-tab-count">${opsListings.filter(l=>["ferme","vendu"].includes(l.status)).length}</span></button>
     </div>`;
 
   ha.innerHTML = `
@@ -475,6 +508,7 @@ function renderOps() {
   if (opsView==="dash") { el.innerHTML = tabs + opsRenderDash(); return; }
   if (opsView==="listings") { el.innerHTML = tabs + opsRenderListings(); return; }
   if (opsView==="purchases") { el.innerHTML = tabs + opsRenderPurchases(); return; }
+  if (opsView==="ventes") { el.innerHTML = tabs + opsRenderVentes(); return; }
 }
 
 window.opsSetView = function(v) { opsView=v; renderOps(); };
@@ -482,7 +516,7 @@ window.opsSetView = function(v) { opsView=v; renderOps(); };
 function opsRenderDash() {
   const activeL = opsListings.filter(l=>["offre","ferme"].includes(l.status));
   let vol = 0;
-  activeL.forEach(l=>vol+=opsParsePx(l.price));
+  activeL.forEach(l=>vol+=opsParsePx(l.offerPrice||l.price));
   opsPurchases.forEach(p=>vol+=opsParsePx(p.price));
   const comm = vol*0.02;
   let urgCount = 0;
@@ -491,17 +525,22 @@ function opsRenderDash() {
   opsPurchases.forEach(p=>(p.conditions||[]).forEach(c=>{const i=opsCondInfo(c);if(i.urg)urgCount++;allC.push({src:p.addr,type:"p",c,i});}));
   allC.sort((a,b)=>{if(!a.c.date&&!b.c.date)return 0;if(!a.c.date)return 1;if(!b.c.date)return -1;return new Date(a.c.date)-new Date(b.c.date);});
 
+  const ventesL = opsListings.filter(l=>["ferme","vendu"].includes(l.status));
+  const volVendu = ventesL.reduce((s,l)=>s+opsParsePx(l.offerPrice||l.price),0);
+  const commVendu = volVendu*0.02;
+
   return `
-  <div class="ops-kpi-grid">
+  <div class="ops-kpi-grid" style="grid-template-columns:repeat(5,minmax(0,1fr));">
     <div class="ops-kpi" style="border-left-color:#0C2B5E"><div class="ops-kpi-l">Dossiers actifs</div><div class="ops-kpi-v">${activeL.length+opsPurchases.length}</div><div class="ops-kpi-s">inscriptions + achats</div></div>
     <div class="ops-kpi" style="border-left-color:#378ADD"><div class="ops-kpi-l">Volume immobilier</div><div class="ops-kpi-v">${opsFmtPx(vol)}</div><div class="ops-kpi-s">valeur totale des dossiers</div></div>
     <div class="ops-kpi" style="border-left-color:#1D9E75"><div class="ops-kpi-l">Commission estimée</div><div class="ops-kpi-v">${opsFmtPx(comm)}</div><div class="ops-kpi-s">2% du volume</div></div>
     <div class="ops-kpi" style="border-left-color:${urgCount>0?"#E24B4A":"#888780"}"><div class="ops-kpi-l">Conditions urgentes</div><div class="ops-kpi-v" style="color:${urgCount>0?"#E24B4A":"var(--text)"}">${urgCount}</div><div class="ops-kpi-s">délai ≤ 3 jours</div></div>
+    <div class="ops-kpi" style="border-left-color:#534AB7;background:#F4F3FF;"><div class="ops-kpi-l" style="color:#534AB7;">Volume d'affaire vendu</div><div class="ops-kpi-v" style="color:#534AB7;">${opsFmtPx(volVendu)}</div><div class="ops-kpi-s" style="color:#534AB7;">${ventesL.length} dossier${ventesL.length!==1?"s":""} · comm. ${opsFmtPx(commVendu)}</div></div>
   </div>
   <div class="ops-two-col">
     <div class="ops-card">
       <div class="ops-card-hd"><span class="ops-card-title">Inscriptions sous contrat</span><span class="ops-pill ops-pill-green">${activeL.length}</span></div>
-      ${activeL.length ? activeL.map(l=>{const px=opsParsePx(l.price);return`<div class="ops-deal-row"><div class="ops-deal-dot" style="background:${l.status==="ferme"?"#1D9E75":"#378ADD"}"></div><div class="ops-deal-info"><div class="ops-deal-addr">${l.addr}</div><div class="ops-deal-meta">${[l.seller,l.agent,OPS_STATUS_LABELS[l.status]].filter(Boolean).join(" · ")}</div></div><div><div class="ops-deal-price">${opsFmtPx(px)}</div><div class="ops-deal-comm">${px?"comm. "+opsFmtPx(px*.02):""}</div></div></div>`;}).join("") : `<div class="ops-empty">Aucune inscription sous contrat</div>`}
+      ${activeL.length ? activeL.map(l=>{const px=opsParsePx(l.price);const displayPx=opsParsePx(l.offerPrice||l.price);const hasOffer=l.offerPrice&&l.offerPrice!==l.price;return`<div class="ops-deal-row"><div class="ops-deal-dot" style="background:${l.status==="ferme"?"#1D9E75":"#378ADD"}"></div><div class="ops-deal-info"><div class="ops-deal-addr">${l.addr}</div><div class="ops-deal-meta">${[l.seller,l.agent,OPS_STATUS_LABELS[l.status]].filter(Boolean).join(" · ")}</div></div><div><div class="ops-deal-price">${opsFmtPx(displayPx)}${hasOffer?'<span style="font-size:10px;color:#1D9E75;margin-left:4px;">offre</span>':""}</div><div class="ops-deal-comm">${displayPx?"comm. "+opsFmtPx(displayPx*.02):""}</div></div></div>`;}).join("") : `<div class="ops-empty">Aucune inscription sous contrat</div>`}
     </div>
     <div class="ops-card">
       <div class="ops-card-hd"><span class="ops-card-title">Achats sous conditions</span><span class="ops-pill ops-pill-amber">${opsPurchases.length}</span></div>
@@ -547,9 +586,10 @@ function opsRenderListings() {
     <div class="ops-listing-hdr">
       <div>
         <div class="ops-addr-big">${l.addr} <span class="ops-status-badge" style="background:${OPS_STATUS_COLORS[l.status]}20;color:${OPS_STATUS_COLORS[l.status]};border:1px solid ${OPS_STATUS_COLORS[l.status]}40">${OPS_STATUS_LABELS[l.status]}</span></div>
-        <div class="ops-listing-sub">${[l.seller,l.price,l.agent].filter(Boolean).join(" · ")}</div>
+        <div class="ops-listing-sub">${[l.seller,l.agent].filter(Boolean).join(" · ")}${l.price?` · Inscrit: ${l.price}`:""}${l.offerPrice?` · <strong style="color:#1D9E75;">Offre: ${l.offerPrice}</strong>`:""}</div>
       </div>
       <div class="ops-lactions">
+        ${l.status==="active"?`<button class="btn-primary" style="font-size:13px;padding:7px 16px;background:#1D9E75;border:none;" onclick="opsAccepterOffre('${l.id}')">✓ Offre reçue</button>`:""}
         <select class="ops-status-sel" onchange="opsChgStatus('${l.id}',this.value)">
           <option value="active"${l.status==="active"?" selected":""}>Actif</option>
           <option value="offre"${l.status==="offre"?" selected":""}>Offre reçue</option>
@@ -602,6 +642,57 @@ function opsRenderPurchases() {
     </div>
     ${opsCondsBlock("p", p)}`;
 }
+
+function opsRenderVentes() {
+  const ventes = opsListings.filter(l=>["ferme","vendu"].includes(l.status));
+  if (!ventes.length) return `<div class="empty-state"><div class="empty-icon">◩</div><div class="empty-title">Aucune vente conclue</div><div class="empty-sub">Les dossiers en vente ferme et vendus apparaîtront ici.</div></div>`;
+
+  const totalVol = ventes.reduce((s,l)=>s+opsParsePx(l.offerPrice||l.price),0);
+  const totalComm = totalVol*0.02;
+
+  const rows = ventes.map(l=>{
+    const px = opsParsePx(l.offerPrice||l.price);
+    const statusColor = l.status==="vendu"?"#534AB7":"#1D9E75";
+    const statusLabel = OPS_STATUS_LABELS[l.status];
+    return `<div class="ops-vente-row">
+      <div class="ops-vente-main">
+        <div class="ops-vente-addr">${l.addr}</div>
+        <div class="ops-vente-meta">${[l.seller,l.agent].filter(Boolean).join(" · ")}</div>
+      </div>
+      <div class="ops-vente-fields">
+        <div class="ops-vente-field">
+          <div class="ops-vente-field-label">Prix accepté</div>
+          <div class="ops-vente-field-val">${opsFmtPx(px)}</div>
+          ${l.offerPrice&&l.offerPrice!==l.price?`<div style="font-size:11px;color:var(--text-3);">Inscrit: ${l.price}</div>`:""}
+        </div>
+        <div class="ops-vente-field">
+          <div class="ops-vente-field-label">Commission est.</div>
+          <div class="ops-vente-field-val" style="color:#1D9E75;">${px?opsFmtPx(px*0.02):"—"}</div>
+        </div>
+        <div class="ops-vente-field">
+          <div class="ops-vente-field-label">Date du notaire</div>
+          <input type="date" value="${l.notaryDate||""}" onchange="opsUpdateNotaryDate('${l.id}',this.value)" style="font-size:12px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);width:145px;" />
+        </div>
+        <div class="ops-vente-field">
+          <div class="ops-vente-field-label">Statut</div>
+          <span style="font-size:12px;font-weight:500;padding:3px 10px;border-radius:99px;background:${statusColor}20;color:${statusColor};border:1px solid ${statusColor}40;">${statusLabel}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+
+  return `
+    <div class="ops-ventes-summary">
+      <div class="ops-vente-kpi"><div class="ops-kpi-l">Dossiers conclus</div><div class="ops-kpi-v">${ventes.length}</div></div>
+      <div class="ops-vente-kpi"><div class="ops-kpi-l">Volume total</div><div class="ops-kpi-v">${opsFmtPx(totalVol)}</div></div>
+      <div class="ops-vente-kpi"><div class="ops-kpi-l">Commission totale est.</div><div class="ops-kpi-v" style="color:#1D9E75;">${opsFmtPx(totalComm)}</div></div>
+    </div>
+    <div class="ops-card">${rows}</div>`;
+}
+
+window.opsUpdateNotaryDate = async function(lid, val) {
+  await updateDoc(doc(db,"ops_listings",lid),{notaryDate:val,updatedAt:serverTimestamp()});
+};
 
 function opsCondsBlock(type, rec) {
   const conds = rec.conditions||[];
