@@ -291,14 +291,17 @@ function subscribeToOps() {
   unsubscribeOpsListings = onSnapshot(lq, snap => {
     opsListings = snap.docs.map(d=>({id:d.id,...d.data()})).filter(opsCanAccess);
     if (document.getElementById("view-ops").classList.contains("active")) {
-      if (Date.now() - (window._lastChecklistSave||0) < 3000) return;
+      if (Date.now() - (window._lastChecklistSave||0) < 5000) return;
       renderOps();
     }
   });
   const pq = query(collection(db,"ops_purchases"), orderBy("createdAt","desc"));
   unsubscribeOpsPurchases = onSnapshot(pq, snap => {
     opsPurchases = snap.docs.map(d=>({id:d.id,...d.data()})).filter(opsCanAccess);
-    if (document.getElementById("view-ops").classList.contains("active")) renderOps();
+    if (document.getElementById("view-ops").classList.contains("active")) {
+      if (Date.now() - (window._lastChecklistSave||0) < 5000) return;
+      renderOps();
+    }
   });
 }
 
