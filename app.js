@@ -466,7 +466,16 @@ window.opsToggleCond = async function(type, eid, cid) {
   const rec = type==="l"?opsListings.find(x=>x.id===eid):opsPurchases.find(x=>x.id===eid);
   if (!rec) return;
   const conds = (rec.conditions||[]).map(c=>c.id===cid?{...c,done:!c.done}:c);
-  await updateDoc(doc(db,col,eid),{conditions:conds,updatedAt:serverTimestamp()});
+  const update = {conditions:conds, updatedAt:serverTimestamp()};
+  // For purchases: if all conditions are now done, auto-advance to "conditions réalisées"
+  if (type==="p") {
+    const allDone = conds.length > 0 && conds.every(c=>c.done);
+    if (allDone && (rec.status==="offre"||rec.status==="active")) {
+      update.status = "cond";
+      showToast("Toutes les conditions réalisées — statut mis à jour ✓");
+    }
+  }
+  await updateDoc(doc(db,col,eid),update);
 };
 
 window.opsUpdateCondDate = async function(type, eid, cid, val) {
@@ -925,8 +934,8 @@ function opsRenderDash() {
   const comm = vol*0.02;
   let urgCount = 0;
   const allC = [];
-  opsListings.forEach(l=>(l.conditions||[]).forEach(c=>{const i=opsCondInfo(c);if(i.urg)urgCount++;allC.push({src:l.addr,type:"l",c,i});}));
-  opsPurchases.forEach(p=>(p.conditions||[]).forEach(c=>{const i=opsCondInfo(c);if(i.urg)urgCount++;allC.push({src:p.addr,type:"p",c,i});}));
+  opsListings.forEach(l=>(l.conditions||[]).filter(c=>!c.done).forEach(c=>{const i=opsCondInfo(c);if(i.urg)urgCount++;allC.push({src:l.addr,type:"l",c,i});}));
+  opsPurchases.forEach(p=>(p.conditions||[]).filter(c=>!c.done).forEach(c=>{const i=opsCondInfo(c);if(i.urg)urgCount++;allC.push({src:p.addr,type:"p",c,i});}));
   allC.sort((a,b)=>{if(!a.c.date&&!b.c.date)return 0;if(!a.c.date)return 1;if(!b.c.date)return -1;return new Date(a.c.date)-new Date(b.c.date);});
 
   const ventesL = opsListings.filter(l=>["ferme","vendu"].includes(l.status));
