@@ -1077,7 +1077,7 @@ function opsRenderListings() {
         </select>
         ${isAdmin?`<button class="btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="opsDeleteListing('${l.id}')">Supprimer</button>`:""}
       </div>
-    </div>\`;
+    </div>`;
 
   return `<div class="ops-rec-tabs">${tabs}</div>${listingHdr}${innerTabs}
     <div class="ops-stats-row">
