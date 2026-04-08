@@ -400,35 +400,288 @@ window.opsUpdateListingPrice = async function(lid, field, val) {
   await updateDoc(doc(db,"ops_listings",lid),update);
 };
 
-window.opsAccepterOffre = function(lid) {
+// ── Offer management ────────────────────────────────────────
+window.opsOpenNewOffer = function(lid) {
   const l = opsListings.find(x=>x.id===lid);
   if (!l) return;
   document.getElementById("opsModalContent").innerHTML = `
-    <div class="modal-header"><div class="modal-title">Offre reçue</div><button class="close-x" onclick="closeAllModals()">×</button></div>
-    <div class="mbody-ops">
-      <p style="font-size:13px;color:var(--text-2);margin-bottom:16px;">Prix inscrit : <strong>${l.price||"—"}</strong></p>
-      <div class="form-group">
-        <label>Prix de l'offre acceptée ($)</label>
-        <input type="text" id="offre-price" placeholder="ex: 1 050 000" style="font-size:15px;font-weight:500;" />
+    <div class="modal-header">
+      <div><div class="modal-title">Nouvelle offre reçue</div>
+      <div class="modal-sub">${l.addr}</div></div>
+      <button class="close-x" onclick="closeAllModals()">×</button>
+    </div>
+    <div class="mbody-ops" style="max-height:65vh;overflow-y:auto;padding-right:4px;">
+      <div class="ops-offer-section-title">Identification</div>
+      <div class="form-group"><label>Nom de l'acheteur</label><input type="text" id="of-buyer" placeholder="ex: Jean Tremblay"></div>
+      <div class="form-group"><label>Courtier représentant</label><input type="text" id="of-agent" placeholder="ex: Marie Dupont — Remax"></div>
+      <div class="form-group"><label>Prix offert ($)</label><input type="text" id="of-price" placeholder="ex: 1 050 000 $" style="font-size:15px;font-weight:500;"></div>
+      <div class="form-group"><label>Validité de l'offre</label><input type="text" id="of-validity" placeholder="ex: 24 heures, jusqu'au 8 avril 17h"></div>
+
+      <div class="ops-offer-section-title" style="margin-top:1.25rem;">Conditions</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="form-group"><label>Inspection (jours)</label><input type="number" id="of-insp" placeholder="ex: 10" min="0"></div>
+        <div class="form-group"><label>Financement (jours)</label><input type="number" id="of-fin" placeholder="ex: 15" min="0"></div>
+        <div class="form-group"><label>Revue de documents (jours)</label><input type="number" id="of-docs" placeholder="ex: 5" min="0"></div>
+        <div class="form-group"><label>Autre condition (jours)</label><input type="number" id="of-other" placeholder="ex: 7" min="0"></div>
       </div>
+      <div class="form-group"><label>Documents requis pour la revue</label><textarea id="of-doclist" rows="2" placeholder="ex: Déclarations du vendeur, procès-verbaux de copropriété..." style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;"></textarea></div>
+      <div class="form-group"><label>Autre condition — détails</label><textarea id="of-otherdet" rows="2" placeholder="ex: Vente de la propriété actuelle de l'acheteur..." style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;"></textarea></div>
+
+      <div class="ops-offer-section-title" style="margin-top:1.25rem;">Dates & occupation</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="form-group"><label>Date du notaire souhaitée</label><input type="date" id="of-notary"></div>
+        <div class="form-group"><label>Date d'occupation souhaitée</label><input type="date" id="of-occupancy"></div>
+      </div>
+      <div class="form-group"><label>Loyer si délai entre notaire et occupation?</label>
+        <select id="of-rent" onchange="document.getElementById('of-rentdet-wrap').style.display=this.value==='oui'?'block':'none'">
+          <option value="">— Sélectionner —</option>
+          <option value="non">Non</option>
+          <option value="oui">Oui</option>
+        </select>
+      </div>
+      <div id="of-rentdet-wrap" style="display:none;">
+        <div class="form-group"><label>Détails du loyer</label><textarea id="of-rentdet" rows="2" placeholder="ex: 75$/jour à compter du notaire jusqu'à l'occupation" style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;"></textarea></div>
+      </div>
+
+      <div class="ops-offer-section-title" style="margin-top:1.25rem;">Inclusions & exclusions</div>
+      <div class="form-group"><label>Inclusions</label><textarea id="of-incl" rows="2" placeholder="ex: Électroménagers, luminaires, stores..." style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;"></textarea></div>
+      <div class="form-group"><label>Exclusions</label><textarea id="of-excl" rows="2" placeholder="ex: Lustre de la salle à manger, miroir entrée..." style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;"></textarea></div>
     </div>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="closeAllModals()">Annuler</button>
-      <button class="btn-primary" style="width:auto;padding:9px 20px;background:#1D9E75;border-color:#1D9E75;" onclick="opsConfirmOffre('${lid}')">Confirmer l'offre</button>
+      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="opsSaveOffer('${lid}')">Enregistrer l'offre</button>
     </div>`;
   openModal("opsModal");
 };
 
-window.opsConfirmOffre = async function(lid) {
-  const val = document.getElementById("offre-price").value.trim();
-  if (!val) { showToast("Veuillez entrer le prix de l'offre"); return; }
+window.opsSaveOffer = async function(lid) {
+  const g = id => document.getElementById(id)?.value?.trim();
+  if (!g("of-buyer") && !g("of-agent")) { showToast("Veuillez entrer le nom de l'acheteur ou du courtier"); return; }
+  const offer = {
+    id: "o" + Date.now(),
+    buyer: g("of-buyer"), agent: g("of-agent"),
+    price: g("of-price"), validity: g("of-validity"),
+    conditions: {
+      inspection: g("of-insp")||"", financing: g("of-fin")||"",
+      docReview: g("of-docs")||"", other: g("of-other")||"",
+      docList: g("of-doclist"), otherDetails: g("of-otherdet"),
+    },
+    notaryDate: g("of-notary"), occupancyDate: g("of-occupancy"),
+    rent: g("of-rent"), rentDetails: g("of-rentdet"),
+    inclusions: g("of-incl"), exclusions: g("of-excl"),
+    status: "pending", // pending | accepted | second | refused
+    receivedAt: new Date().toISOString(),
+    acceptedAt: null,
+    deadlines: {},
+  };
+  const l = opsListings.find(x=>x.id===lid);
+  const offers = [...(l.offers||[]), offer];
+  await updateDoc(doc(db,"ops_listings",lid),{offers, status:"offre", updatedAt:serverTimestamp()});
+  closeAllModals();
+  showToast("Offre enregistrée ✓");
+};
+
+window.opsAcceptOffer = async function(lid, oid) {
+  const l = opsListings.find(x=>x.id===lid);
+  if (!l) return;
+  const acceptedAt = new Date().toISOString();
+  const offers = (l.offers||[]).map(o=>{
+    if (o.id !== oid) return o;
+    const deadlines = {};
+    const base = new Date(acceptedAt);
+    if (o.conditions.inspection) { const d=new Date(base); d.setDate(d.getDate()+parseInt(o.conditions.inspection)); deadlines.inspection=d.toISOString().slice(0,10); }
+    if (o.conditions.financing) { const d=new Date(base); d.setDate(d.getDate()+parseInt(o.conditions.financing)); deadlines.financing=d.toISOString().slice(0,10); }
+    if (o.conditions.docReview) { const d=new Date(base); d.setDate(d.getDate()+parseInt(o.conditions.docReview)); deadlines.docReview=d.toISOString().slice(0,10); }
+    if (o.conditions.other) { const d=new Date(base); d.setDate(d.getDate()+parseInt(o.conditions.other)); deadlines.other=d.toISOString().slice(0,10); }
+    return {...o, status:"accepted", acceptedAt, deadlines};
+  });
+  const accepted = offers.find(o=>o.id===oid);
   await updateDoc(doc(db,"ops_listings",lid),{
-    status:"offre",
-    offerPrice: val,
-    updatedAt: serverTimestamp()
+    offers, offerPrice: accepted.price,
+    status:"offre", updatedAt:serverTimestamp()
   });
   closeAllModals();
-  showToast("Offre reçue — dossier mis à jour ✓");
+  showToast("Offre acceptée — délais calculés ✓");
+};
+
+window.opsSetOfferStatus = async function(lid, oid, status) {
+  const l = opsListings.find(x=>x.id===lid);
+  if (!l) return;
+  const offers = (l.offers||[]).map(o=>o.id===oid?{...o,status}:o);
+  await updateDoc(doc(db,"ops_listings",lid),{offers,updatedAt:serverTimestamp()});
+  showToast(status==="second"?"Offre mise en 2e rang ✓":"Offre refusée");
+};
+
+window.opsEditOffer = function(lid, oid) {
+  const l = opsListings.find(x=>x.id===lid);
+  const o = (l?.offers||[]).find(x=>x.id===oid);
+  if (!l||!o) return;
+  document.getElementById("opsModalContent").innerHTML = `
+    <div class="modal-header">
+      <div><div class="modal-title">Modifier l'offre</div>
+      <div class="modal-sub">${o.buyer||o.agent||"Offre"}</div></div>
+      <button class="close-x" onclick="closeAllModals()">×</button>
+    </div>
+    <div class="mbody-ops" style="max-height:65vh;overflow-y:auto;padding-right:4px;">
+      <div class="ops-offer-section-title">Identification</div>
+      <div class="form-group"><label>Nom de l'acheteur</label><input type="text" id="of-buyer" value="${o.buyer||""}" placeholder="ex: Jean Tremblay"></div>
+      <div class="form-group"><label>Courtier représentant</label><input type="text" id="of-agent" value="${o.agent||""}" placeholder="ex: Marie Dupont — Remax"></div>
+      <div class="form-group"><label>Prix offert ($)</label><input type="text" id="of-price" value="${o.price||""}" style="font-size:15px;font-weight:500;"></div>
+      <div class="form-group"><label>Validité de l'offre</label><input type="text" id="of-validity" value="${o.validity||""}"></div>
+      <div class="ops-offer-section-title" style="margin-top:1.25rem;">Conditions</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="form-group"><label>Inspection (jours)</label><input type="number" id="of-insp" value="${o.conditions?.inspection||""}" min="0"></div>
+        <div class="form-group"><label>Financement (jours)</label><input type="number" id="of-fin" value="${o.conditions?.financing||""}" min="0"></div>
+        <div class="form-group"><label>Revue de documents (jours)</label><input type="number" id="of-docs" value="${o.conditions?.docReview||""}" min="0"></div>
+        <div class="form-group"><label>Autre condition (jours)</label><input type="number" id="of-other" value="${o.conditions?.other||""}" min="0"></div>
+      </div>
+      <div class="form-group"><label>Documents requis pour la revue</label><textarea id="of-doclist" rows="2" style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;">${o.conditions?.docList||""}</textarea></div>
+      <div class="form-group"><label>Autre condition — détails</label><textarea id="of-otherdet" rows="2" style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;">${o.conditions?.otherDetails||""}</textarea></div>
+      <div class="ops-offer-section-title" style="margin-top:1.25rem;">Dates & occupation</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="form-group"><label>Date du notaire souhaitée</label><input type="date" id="of-notary" value="${o.notaryDate||""}"></div>
+        <div class="form-group"><label>Date d'occupation souhaitée</label><input type="date" id="of-occupancy" value="${o.occupancyDate||""}"></div>
+      </div>
+      <div class="form-group"><label>Loyer si délai entre notaire et occupation?</label>
+        <select id="of-rent" onchange="document.getElementById('of-rentdet-wrap').style.display=this.value==='oui'?'block':'none'">
+          <option value="">— Sélectionner —</option>
+          <option value="non"${o.rent==="non"?" selected":""}>Non</option>
+          <option value="oui"${o.rent==="oui"?" selected":""}>Oui</option>
+        </select>
+      </div>
+      <div id="of-rentdet-wrap" style="display:${o.rent==='oui'?'block':'none'}">
+        <div class="form-group"><label>Détails du loyer</label><textarea id="of-rentdet" rows="2" style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;">${o.rentDetails||""}</textarea></div>
+      </div>
+      <div class="ops-offer-section-title" style="margin-top:1.25rem;">Inclusions & exclusions</div>
+      <div class="form-group"><label>Inclusions</label><textarea id="of-incl" rows="2" style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;">${o.inclusions||""}</textarea></div>
+      <div class="form-group"><label>Exclusions</label><textarea id="of-excl" rows="2" style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;">${o.exclusions||""}</textarea></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeAllModals()">Annuler</button>
+      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="opsUpdateOffer('${lid}','${oid}')">Enregistrer</button>
+    </div>`;
+  openModal("opsModal");
+};
+
+window.opsUpdateOffer = async function(lid, oid) {
+  const g = id => document.getElementById(id)?.value?.trim();
+  const l = opsListings.find(x=>x.id===lid);
+  const offers = (l.offers||[]).map(o=>{
+    if (o.id!==oid) return o;
+    const updated = {...o,
+      buyer:g("of-buyer"), agent:g("of-agent"),
+      price:g("of-price"), validity:g("of-validity"),
+      conditions:{
+        inspection:g("of-insp")||"", financing:g("of-fin")||"",
+        docReview:g("of-docs")||"", other:g("of-other")||"",
+        docList:g("of-doclist"), otherDetails:g("of-otherdet"),
+      },
+      notaryDate:g("of-notary"), occupancyDate:g("of-occupancy"),
+      rent:g("of-rent"), rentDetails:g("of-rentdet"),
+      inclusions:g("of-incl"), exclusions:g("of-excl"),
+    };
+    // Recalculate deadlines if already accepted
+    if (o.status==="accepted"&&o.acceptedAt) {
+      const base=new Date(o.acceptedAt); const deadlines={};
+      if (updated.conditions.inspection){const d=new Date(base);d.setDate(d.getDate()+parseInt(updated.conditions.inspection));deadlines.inspection=d.toISOString().slice(0,10);}
+      if (updated.conditions.financing){const d=new Date(base);d.setDate(d.getDate()+parseInt(updated.conditions.financing));deadlines.financing=d.toISOString().slice(0,10);}
+      if (updated.conditions.docReview){const d=new Date(base);d.setDate(d.getDate()+parseInt(updated.conditions.docReview));deadlines.docReview=d.toISOString().slice(0,10);}
+      if (updated.conditions.other){const d=new Date(base);d.setDate(d.getDate()+parseInt(updated.conditions.other));deadlines.other=d.toISOString().slice(0,10);}
+      updated.deadlines=deadlines;
+    }
+    return updated;
+  });
+  await updateDoc(doc(db,"ops_listings",lid),{offers,updatedAt:serverTimestamp()});
+  closeAllModals();
+  showToast("Offre mise à jour ✓");
+};
+
+window.opsDeleteOffer = async function(lid, oid) {
+  if (!confirm("Supprimer cette offre?")) return;
+  const l = opsListings.find(x=>x.id===lid);
+  const offers = (l.offers||[]).filter(o=>o.id!==oid);
+  const hasActive = offers.some(o=>o.status==="accepted"||o.status==="pending"||o.status==="second");
+  const newStatus = hasActive?"offre":"active";
+  await updateDoc(doc(db,"ops_listings",lid),{offers,status:newStatus,updatedAt:serverTimestamp()});
+  showToast("Offre supprimée");
+};
+
+window.opsGenerateOfferPDF = function(lid, oid) {
+  const l = opsListings.find(x=>x.id===lid);
+  const o = (l?.offers||[]).find(x=>x.id===oid);
+  if (!l||!o) return;
+  const fmtDate = ds => { if(!ds) return "—"; const d=new Date(ds); return d.toLocaleDateString("fr-CA",{day:"numeric",month:"long",year:"numeric"}); };
+  const fmtDeadline = (ds,days) => { if(!ds&&!days) return "—"; if(ds) return fmtDate(ds)+(days?` (${days}j)`:""); return `${days} jours à compter de l'acceptation`; };
+  const statusLabels={pending:"En attente",accepted:"Acceptée",second:"2e rang",refused:"Refusée"};
+  const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
+  <title>Résumé d'offre — ${l.addr}</title>
+  <style>
+    body{font-family:Arial,sans-serif;font-size:13px;color:#1a1a1a;margin:40px;line-height:1.6;}
+    h1{font-size:20px;color:#0C2B5E;margin-bottom:4px;}
+    .sub{font-size:13px;color:#666;margin-bottom:24px;}
+    .section{margin-bottom:20px;}
+    .section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#0C2B5E;border-bottom:1px solid #ddd;padding-bottom:4px;margin-bottom:10px;}
+    .row{display:flex;gap:16px;margin-bottom:6px;}
+    .field{flex:1;}
+    .label{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.04em;}
+    .val{font-size:14px;font-weight:500;color:#1a1a1a;}
+    .price{font-size:22px;font-weight:700;color:#0C2B5E;}
+    .badge{display:inline-block;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600;background:#E1F5EE;color:#085041;}
+    .footer{margin-top:40px;font-size:11px;color:#aaa;border-top:1px solid #eee;padding-top:12px;}
+    table{width:100%;border-collapse:collapse;}
+    td{padding:7px 10px;border-bottom:1px solid #f0f0f0;font-size:13px;}
+    td:first-child{color:#888;width:200px;}
+    td:last-child{font-weight:500;}
+  </style></head><body>
+  <h1>BACHA Groupe Immobilier</h1>
+  <div class="sub">Résumé d'offre d'achat — généré le ${fmtDate(new Date().toISOString())}</div>
+  <div class="section">
+    <div class="section-title">Propriété</div>
+    <div class="val" style="font-size:16px;">${l.addr}</div>
+    ${l.price?`<div style="color:#666;font-size:13px;">Prix inscrit : ${l.price}</div>`:""}
+  </div>
+  <div class="section">
+    <div class="section-title">Offre</div>
+    <table>
+      <tr><td>Acheteur</td><td>${o.buyer||"—"}</td></tr>
+      <tr><td>Courtier représentant</td><td>${o.agent||"—"}</td></tr>
+      <tr><td>Prix offert</td><td class="price">${o.price||"—"}</td></tr>
+      <tr><td>Validité de l'offre</td><td>${o.validity||"—"}</td></tr>
+      <tr><td>Statut</td><td><span class="badge">${statusLabels[o.status]||"—"}</span></td></tr>
+      ${o.acceptedAt?`<tr><td>Date d'acceptation</td><td>${fmtDate(o.acceptedAt)}</td></tr>`:""}
+    </table>
+  </div>
+  <div class="section">
+    <div class="section-title">Conditions</div>
+    <table>
+      ${o.conditions?.inspection?`<tr><td>Inspection</td><td>${fmtDeadline(o.deadlines?.inspection,o.conditions.inspection)}</td></tr>`:""}
+      ${o.conditions?.financing?`<tr><td>Financement</td><td>${fmtDeadline(o.deadlines?.financing,o.conditions.financing)}</td></tr>`:""}
+      ${o.conditions?.docReview?`<tr><td>Revue de documents</td><td>${fmtDeadline(o.deadlines?.docReview,o.conditions.docReview)}${o.conditions.docList?`<br><span style="font-size:12px;color:#666;">Documents : ${o.conditions.docList}</span>`:""}</td></tr>`:""}
+      ${o.conditions?.other?`<tr><td>Autre condition</td><td>${fmtDeadline(o.deadlines?.other,o.conditions.other)}${o.conditions.otherDetails?`<br><span style="font-size:12px;color:#666;">${o.conditions.otherDetails}</span>`:""}</td></tr>`:""}
+      ${!o.conditions?.inspection&&!o.conditions?.financing&&!o.conditions?.docReview&&!o.conditions?.other?`<tr><td colspan="2" style="color:#888;">Aucune condition</td></tr>`:""}
+    </table>
+  </div>
+  <div class="section">
+    <div class="section-title">Dates & occupation</div>
+    <table>
+      <tr><td>Date du notaire souhaitée</td><td>${fmtDate(o.notaryDate)}</td></tr>
+      <tr><td>Date d'occupation souhaitée</td><td>${fmtDate(o.occupancyDate)}</td></tr>
+      <tr><td>Loyer si délai notaire/occupation</td><td>${o.rent==="oui"?"Oui"+(o.rentDetails?" — "+o.rentDetails:""):"Non"}</td></tr>
+    </table>
+  </div>
+  ${o.inclusions||o.exclusions?`<div class="section">
+    <div class="section-title">Inclusions & exclusions</div>
+    <table>
+      ${o.inclusions?`<tr><td>Inclusions</td><td>${o.inclusions}</td></tr>`:""}
+      ${o.exclusions?`<tr><td>Exclusions</td><td>${o.exclusions}</td></tr>`:""}
+    </table>
+  </div>`:""}
+  <div class="footer">BACHA Groupe Immobilier · Document généré par Track · ${new Date().toLocaleDateString("fr-CA")}</div>
+  </body></html>`;
+  const win = window.open("","_blank");
+  win.document.write(html);
+  win.document.close();
+  setTimeout(()=>win.print(),500);
 };
 
 window.opsDeleteListing = async function(lid) {
@@ -593,7 +846,7 @@ function opsRenderListings() {
         </div>
       </div>
       <div class="ops-lactions">
-        ${l.status==="active"?`<button class="btn-primary" style="font-size:13px;padding:7px 16px;background:#1D9E75;border:none;" onclick="opsAccepterOffre('${l.id}')">✓ Offre reçue</button>`:""}
+        <button class="btn-primary" style="font-size:13px;padding:7px 16px;background:#185FA5;border:none;" onclick="opsOpenNewOffer('${l.id}')">+ Nouvelle offre</button>
         <select class="ops-status-sel" onchange="opsChgStatus('${l.id}',this.value)">
           <option value="active"${l.status==="active"?" selected":""}>Actif</option>
           <option value="offre"${l.status==="offre"?" selected":""}>Offre reçue</option>
@@ -610,6 +863,7 @@ function opsRenderListings() {
       <div class="ops-stat"><div class="ops-stat-l">Progrès</div><div class="ops-stat-v">${p.pct}%</div></div>
     </div>
     <div class="ops-pbar-wrap"><div class="ops-pbar-fill" style="width:${p.pct}%;background:${bc}"></div></div>
+    ${opsOffersBlock(l)}
     ${condsHtml}
     ${phasesHtml}`;
 }
@@ -669,6 +923,72 @@ function opsRenderPurchases() {
       </div>
     </div>
     ${opsCondsBlock("p", p)}`;
+}
+
+function opsOffersBlock(l) {
+  const offers = l.offers||[];
+  if (!offers.length) return "";
+  const statusConfig = {
+    pending:  {label:"En attente",  color:"#185FA5", bg:"#E6F1FB"},
+    accepted: {label:"Acceptée",    color:"#1D9E75", bg:"#E1F5EE"},
+    second:   {label:"2e rang",     color:"#BA7517", bg:"#FAEEDA"},
+    refused:  {label:"Refusée",     color:"#888780", bg:"#F1EFE8"},
+  };
+  const fmtDate = ds => { if(!ds) return "—"; const d=new Date(ds); return d.toLocaleDateString("fr-CA",{day:"numeric",month:"short"}); };
+
+  const rows = offers.map(o=>{
+    const sc = statusConfig[o.status]||statusConfig.pending;
+    const isAccepted = o.status==="accepted";
+    const deadlineRows = isAccepted&&o.deadlines ? [
+      o.deadlines.inspection?`<div class="ops-deadline-row"><span>Inspection</span><span>${fmtDate(o.deadlines.inspection)}</span></div>`:"",
+      o.deadlines.financing?`<div class="ops-deadline-row"><span>Financement</span><span>${fmtDate(o.deadlines.financing)}</span></div>`:"",
+      o.deadlines.docReview?`<div class="ops-deadline-row"><span>Revue de documents</span><span>${fmtDate(o.deadlines.docReview)}</span></div>`:"",
+      o.deadlines.other?`<div class="ops-deadline-row"><span>Autre condition</span><span>${fmtDate(o.deadlines.other)}</span></div>`:"",
+    ].filter(Boolean).join("") : "";
+
+    return `<div class="ops-offer-card${isAccepted?" ops-offer-accepted":""}">
+      <div class="ops-offer-top">
+        <div class="ops-offer-who">
+          <div class="ops-offer-name">${o.buyer||o.agent||"Offre sans nom"}</div>
+          ${o.buyer&&o.agent?`<div class="ops-offer-sub">${o.agent}</div>`:""}
+        </div>
+        <div style="text-align:right;">
+          <div class="ops-offer-price">${o.price||"—"}</div>
+          <span style="font-size:11px;padding:2px 8px;border-radius:99px;background:${sc.bg};color:${sc.color};font-weight:500;">${sc.label}</span>
+        </div>
+      </div>
+      ${o.conditions?.inspection||o.conditions?.financing||o.conditions?.docReview||o.conditions?.other?`
+      <div class="ops-offer-conds">
+        ${o.conditions.inspection?`<span class="ops-offer-cond-tag">Inspection ${o.conditions.inspection}j</span>`:""}
+        ${o.conditions.financing?`<span class="ops-offer-cond-tag">Financement ${o.conditions.financing}j</span>`:""}
+        ${o.conditions.docReview?`<span class="ops-offer-cond-tag">Documents ${o.conditions.docReview}j</span>`:""}
+        ${o.conditions.other?`<span class="ops-offer-cond-tag">Autre ${o.conditions.other}j</span>`:""}
+      </div>`:""}
+      ${isAccepted&&deadlineRows?`<div class="ops-deadlines">${deadlineRows}</div>`:""}
+      <div class="ops-offer-actions">
+        ${o.status==="pending"?`
+          <button class="ops-offer-btn ops-offer-btn-green" onclick="opsAcceptOffer('${l.id}','${o.id}')">✓ Accepter</button>
+          <button class="ops-offer-btn ops-offer-btn-amber" onclick="opsSetOfferStatus('${l.id}','${o.id}','second')">2e rang</button>
+          <button class="ops-offer-btn ops-offer-btn-gray" onclick="opsSetOfferStatus('${l.id}','${o.id}','refused')">Refuser</button>
+        `:""}
+        ${o.status==="second"?`
+          <button class="ops-offer-btn ops-offer-btn-green" onclick="opsAcceptOffer('${l.id}','${o.id}')">✓ Accepter</button>
+          <button class="ops-offer-btn ops-offer-btn-gray" onclick="opsSetOfferStatus('${l.id}','${o.id}','refused')">Refuser</button>
+        `:""}
+        ${o.status==="refused"?`
+          <button class="ops-offer-btn ops-offer-btn-gray" onclick="opsSetOfferStatus('${l.id}','${o.id}','pending')">↩ Remettre en attente</button>
+        `:""}
+        <button class="ops-offer-btn" onclick="opsEditOffer('${l.id}','${o.id}')">Modifier</button>
+        <button class="ops-offer-btn" onclick="opsGenerateOfferPDF('${l.id}','${o.id}')">PDF ↗</button>
+        <button class="ops-offer-btn ops-offer-btn-red" onclick="opsDeleteOffer('${l.id}','${o.id}')">Supprimer</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  return `<div class="ops-conds-card" style="margin-bottom:1.25rem;">
+    <div class="ops-conds-hd"><span>Offres reçues (${offers.length})</span></div>
+    <div style="padding:.5rem;">${rows}</div>
+  </div>`;
 }
 
 function opsRenderVentes() {
