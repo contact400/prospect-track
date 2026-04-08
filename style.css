@@ -1302,3 +1302,7 @@ body {
 @media (max-width:700px) {
   .ops-act-summary { grid-template-columns:repeat(3,1fr); }
 }
+
+/* ── Language picker ─────────────────────────────────────────── */
+.ops-lang-btn { flex:1; padding:16px; border-radius:var(--radius-lg); border:2px solid var(--border); background:var(--surface); font-size:16px; cursor:pointer; font-family:var(--font); font-weight:500; color:var(--text); transition:all .15s; }
+.ops-lang-btn:hover { border-color:var(--accent); background:var(--bg); }
