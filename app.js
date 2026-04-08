@@ -309,44 +309,140 @@ window.opsSaveListing = async function(editId) {
   closeAllModals(); opsView="listings";
 };
 
-window.opsOpenNewPurchase = function() {
+window.opsOpenNewPurchase = function(editId) {
+  const existing = editId ? opsPurchases.find(x=>x.id===editId) : null;
+  const g = f => existing?.[f]||"";
+  const gc = f => existing?.conditions?.[f]||"";
   document.getElementById("opsModalContent").innerHTML = `
-    <div class="modal-header"><div class="modal-title">Nouvel achat</div><button class="close-x" onclick="closeAllModals()">×</button></div>
-    <div class="mbody-ops">
-      <div class="form-group"><label>Adresse</label><input type="text" id="om-addr" placeholder="456 boul. des Laurentides, Laval"></div>
-      <div class="form-group"><label>Acheteur</label><input type="text" id="om-buyer" placeholder="Nom de l'acheteur"></div>
-      <div class="form-group"><label>Prix d'offre</label><input type="text" id="om-price" placeholder="ex: 489 000 $"></div>
-      <div class="form-group"><label>Courtier</label>
-        <select id="om-agent"><option value="Karim">Karim</option><option value="Benjamin">Benjamin</option><option value="Afshin">Afshin</option></select></div>
-      ${isAdmin ? `<div class="form-group"><label>Accès agents</label>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
-          ${(allUsers.length?allUsers:[{uid:currentUser.uid,name:currentUserProfile?.name||"Karim"}]).map(u=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" value="${u.uid}" class="ops-assign-cb" checked> ${u.name||u.email}</label>`).join("")}
-        </div></div>` : ""}
+    <div class="modal-header">
+      <div><div class="modal-title">${existing?"Modifier l'achat":"Nouvel achat"}</div></div>
+      <button class="close-x" onclick="closeAllModals()">×</button>
+    </div>
+    <div class="mbody-ops" style="max-height:65vh;overflow-y:auto;padding-right:4px;">
+
+      <div class="ops-offer-section-title">Identification</div>
+      <div class="form-group"><label>Adresse de la propriété</label><input type="text" id="om-addr" placeholder="456 boul. des Laurentides, Laval" value="${g("addr")}"></div>
+      <div class="form-group"><label>Nom de l'acheteur</label><input type="text" id="om-buyer" placeholder="ex: Jean Tremblay" value="${g("buyer")}"></div>
+      <div class="form-group"><label>Courtier vendeur (partie adverse)</label><input type="text" id="om-seller-agent" placeholder="ex: Marie Dupont — Remax" value="${g("sellerAgent")}"></div>
+      <div class="form-group"><label>Prix d'offre ($)</label><input type="text" id="om-price" placeholder="ex: 489 000 $" value="${g("price")}" style="font-size:15px;font-weight:500;"></div>
+      <div class="form-group"><label>Validité de l'offre</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="date" id="om-validity-date" value="${g("validityDate")}" style="flex:1;">
+          <input type="time" id="om-validity-time" value="${g("validityTime")||"17:00"}" style="width:110px;">
+        </div>
+      </div>
+      <div class="form-group"><label>Courtier BACHA responsable</label>
+        <select id="om-agent">
+          <option value="Karim"${g("agent")==="Karim"?" selected":""}>Karim</option>
+          <option value="Benjamin"${g("agent")==="Benjamin"?" selected":""}>Benjamin</option>
+          <option value="Afshin"${g("agent")==="Afshin"?" selected":""}>Afshin</option>
+        </select>
+      </div>
+
+      <div class="ops-offer-section-title" style="margin-top:1.25rem;">Conditions</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="form-group"><label>Inspection (jours)</label><input type="number" id="om-insp" placeholder="ex: 10" min="0" value="${gc("inspection")}"></div>
+        <div class="form-group"><label>Financement (jours)</label><input type="number" id="om-fin" placeholder="ex: 15" min="0" value="${gc("financing")}"></div>
+        <div class="form-group"><label>Revue de documents (jours)</label><input type="number" id="om-docs" placeholder="ex: 5" min="0" value="${gc("docReview")}"></div>
+        <div class="form-group"><label>Autre condition (jours)</label><input type="number" id="om-other" placeholder="ex: 7" min="0" value="${gc("other")}"></div>
+      </div>
+      <div class="form-group"><label>Documents requis pour la revue</label><textarea id="om-doclist" rows="2" style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;">${gc("docList")}</textarea></div>
+      <div class="form-group"><label>Autre condition — détails</label><textarea id="om-otherdet" rows="2" style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;">${gc("otherDetails")}</textarea></div>
+
+      <div class="ops-offer-section-title" style="margin-top:1.25rem;">Dates & occupation</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="form-group"><label>Date du notaire souhaitée</label><input type="date" id="om-notary" value="${g("notaryDate")}"></div>
+        <div class="form-group"><label>Date d'occupation souhaitée</label><input type="date" id="om-occupancy" value="${g("occupancyDate")}"></div>
+      </div>
+      <div class="form-group"><label>Loyer si délai entre notaire et occupation?</label>
+        <select id="om-rent" onchange="document.getElementById('om-rentdet-wrap').style.display=this.value==='oui'?'block':'none'">
+          <option value="">— Sélectionner —</option>
+          <option value="non"${g("rent")==="non"?" selected":""}>Non</option>
+          <option value="oui"${g("rent")==="oui"?" selected":""}>Oui</option>
+        </select>
+      </div>
+      <div id="om-rentdet-wrap" style="display:${g("rent")==="oui"?"block":"none"}">
+        <div class="form-group"><label>Détails du loyer</label><textarea id="om-rentdet" rows="2" style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;">${g("rentDetails")}</textarea></div>
+      </div>
+
+      <div class="ops-offer-section-title" style="margin-top:1.25rem;">Inclusions & exclusions</div>
+      <div class="form-group"><label>Inclusions</label><textarea id="om-incl" rows="2" style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;">${g("inclusions")}</textarea></div>
+      <div class="form-group"><label>Exclusions</label><textarea id="om-excl" rows="2" style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;">${g("exclusions")}</textarea></div>
+
+      ${isAdmin ? `<div class="ops-offer-section-title" style="margin-top:1.25rem;">Accès agents</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          ${(allUsers.length?allUsers:[{uid:currentUser.uid,name:currentUserProfile?.name||"Karim"}]).map(u=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" value="${u.uid}" class="ops-assign-cb" ${!existing||((existing.assignedTo||[]).includes(u.uid))?"checked":""}> ${u.name||u.email}</label>`).join("")}
+        </div>` : ""}
     </div>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="closeAllModals()">Annuler</button>
-      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="opsSavePurchase()">Enregistrer</button>
+      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="opsSavePurchase('${editId||""}')">Enregistrer</button>
     </div>`;
   openModal("opsModal");
 };
 
 window.opsSavePurchase = async function(editId) {
-  const addr = document.getElementById("om-addr").value.trim();
-  if (!addr) return;
+  const g = id => document.getElementById(id)?.value?.trim()||"";
+  const addr = g("om-addr");
+  if (!addr) { showToast("Adresse requise"); return; }
+
+  const rawPrice = g("om-price").replace(/[^0-9]/g,"");
+  const fmtPrice = rawPrice ? Number(rawPrice).toLocaleString("fr-CA")+" $" : g("om-price");
+
+  const vDate = g("om-validity-date");
+  const vTime = document.getElementById("om-validity-time")?.value||"";
+  const validityDisplay = vDate ? (() => { const [y,m,d]=vDate.split("-").map(Number); const dt=new Date(y,m-1,d); return dt.toLocaleDateString("fr-CA",{day:"numeric",month:"long",year:"numeric"})+(vTime?" à "+vTime:""); })() : "";
+
   const assignedTo = isAdmin
     ? [...document.querySelectorAll(".ops-assign-cb:checked")].map(cb=>cb.value)
     : [currentUser.uid];
+
+  const conditions = {
+    inspection: g("om-insp"), financing: g("om-fin"),
+    docReview: g("om-docs"), other: g("om-other"),
+    docList: g("om-doclist"), otherDetails: g("om-otherdet"),
+  };
+
+  // Calculate deadlines from today
+  const base = new Date();
+  const localBase = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  const addDays = n => { const d=new Date(localBase); d.setDate(d.getDate()+n); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
+  const deadlines = {};
+  if (conditions.inspection) deadlines.inspection = addDays(parseInt(conditions.inspection));
+  if (conditions.financing)  deadlines.financing  = addDays(parseInt(conditions.financing));
+  if (conditions.docReview)  deadlines.docReview  = addDays(parseInt(conditions.docReview));
+  if (conditions.other)      deadlines.other      = addDays(parseInt(conditions.other));
+
+  // Build conditions array for the tracker
+  const existing = editId ? (opsPurchases.find(x=>x.id===editId)?.conditions||[]).filter(c=>!c.fromOffer) : [];
+  const autoConds = [];
+  if (deadlines.financing)  autoConds.push({id:"ac_fin",  name:"Financement",       date:deadlines.financing,  done:false, fromOffer:true});
+  if (deadlines.inspection) autoConds.push({id:"ac_insp", name:"Inspection",         date:deadlines.inspection, done:false, fromOffer:true});
+  if (deadlines.docReview)  autoConds.push({id:"ac_doc",  name:"Revue de documents", date:deadlines.docReview,  done:false, fromOffer:true});
+  if (deadlines.other)      autoConds.push({id:"ac_oth",  name:conditions.otherDetails||"Autre condition", date:deadlines.other, done:false, fromOffer:true});
+
   const data = {
-    addr, buyer: document.getElementById("om-buyer").value.trim(),
-    price: document.getElementById("om-price").value.trim(),
-    agent: document.getElementById("om-agent").value,
-    status: "active",
-    assignedTo, conditions:[],
+    addr, buyer: g("om-buyer"), sellerAgent: g("om-seller-agent"),
+    price: fmtPrice, agent: g("om-agent"),
+    validityDate: vDate, validityTime: vTime, validity: validityDisplay,
+    conditions: [...autoConds, ...existing],
+    offerConditions: conditions, deadlines,
+    notaryDate: g("om-notary"), occupancyDate: g("om-occupancy"),
+    rent: g("om-rent"), rentDetails: g("om-rentdet"),
+    inclusions: g("om-incl"), exclusions: g("om-excl"),
+    status: "active", assignedTo,
     updatedAt: serverTimestamp()
   };
-  if (editId) { await updateDoc(doc(db,"ops_purchases",editId),data); }
-  else { data.createdAt=serverTimestamp(); data.createdBy=currentUser.uid; const ref=await addDoc(collection(db,"ops_purchases"),data); opsActivePid=ref.id; }
+
+  if (editId) {
+    await updateDoc(doc(db,"ops_purchases",editId),data);
+  } else {
+    data.createdAt=serverTimestamp(); data.createdBy=currentUser.uid;
+    const ref=await addDoc(collection(db,"ops_purchases"),data);
+    opsActivePid=ref.id;
+  }
   closeAllModals(); opsView="purchases";
+  showToast(editId?"Achat mis à jour ✓":"Achat enregistré ✓");
 };
 
 window.opsToggleTask = async function(lid, tid) {
@@ -978,7 +1074,9 @@ function opsRenderPurchases() {
       </div>
       <div class="ops-lactions">
         ${statusBtn}
+        <button class="btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="opsGeneratePurchasePDF('${p.id}')">PDF ↗</button>
         ${pStatus!=="active"?`<button class="btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="opsSetPurchaseStatus('${p.id}','active')">↩ Réinitialiser</button>`:""}
+        <button class="btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="opsOpenNewPurchase('${p.id}')">Modifier</button>
         ${isAdmin?`<button class="btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="opsDeletePurchase('${p.id}')">Supprimer</button>`:""}
       </div>
     </div>
@@ -1050,6 +1148,87 @@ function opsOffersBlock(l) {
     <div style="padding:.5rem;">${rows}</div>
   </div>`;
 }
+
+window.opsGeneratePurchasePDF = function(pid) {
+  const p = opsPurchases.find(x=>x.id===pid);
+  if (!p) return;
+  const fmtDate = ds => { if(!ds) return "—"; const [y,m,d]=ds.slice(0,10).split("-").map(Number); const dt=new Date(y,m-1,d); return dt.toLocaleDateString("fr-CA",{day:"numeric",month:"long",year:"numeric"}); };
+  const fmtDeadline = (ds, days) => { if(!ds&&!days) return "—"; if(ds) return fmtDate(ds)+(days?` (${days}j)`:""); return `${days} jours à compter de la signature`; };
+  const oc = p.offerConditions||{};
+  const dl = p.deadlines||{};
+  const statusLabels={active:"Active",offre:"Offre acceptée",cond:"Conditions réalisées",notarie:"Notarié"};
+  const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
+  <title>Promesse d'achat — ${p.addr}</title>
+  <style>
+    body{font-family:Arial,sans-serif;font-size:13px;color:#1a1a1a;margin:40px;line-height:1.6;}
+    h1{font-size:20px;color:#0C2B5E;margin-bottom:4px;}
+    .sub{font-size:13px;color:#666;margin-bottom:24px;}
+    .section{margin-bottom:20px;}
+    .section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#0C2B5E;border-bottom:1px solid #ddd;padding-bottom:4px;margin-bottom:10px;}
+    .price{font-size:22px;font-weight:700;color:#0C2B5E;}
+    table{width:100%;border-collapse:collapse;}
+    td{padding:7px 10px;border-bottom:1px solid #f0f0f0;font-size:13px;}
+    td:first-child{color:#888;width:220px;}
+    td:last-child{font-weight:500;}
+    .footer{margin-top:40px;font-size:11px;color:#aaa;border-top:1px solid #eee;padding-top:12px;}
+  </style></head><body>
+  <h1>BACHA Groupe Immobilier</h1>
+  <div class="sub">Résumé de promesse d'achat — généré le ${fmtDate(new Date().toISOString().slice(0,10))}</div>
+
+  <div class="section">
+    <div class="section-title">Propriété</div>
+    <table>
+      <tr><td>Adresse</td><td style="font-size:16px;font-weight:700;">${p.addr}</td></tr>
+      ${p.sellerAgent?`<tr><td>Courtier vendeur</td><td>${p.sellerAgent}</td></tr>`:""}
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Offre</div>
+    <table>
+      <tr><td>Acheteur</td><td>${p.buyer||"—"}</td></tr>
+      <tr><td>Courtier BACHA</td><td>${p.agent||"—"}</td></tr>
+      <tr><td>Prix offert</td><td class="price">${p.price||"—"}</td></tr>
+      <tr><td>Validité de l'offre</td><td>${p.validity||"—"}</td></tr>
+      <tr><td>Statut</td><td>${statusLabels[p.status]||"—"}</td></tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Conditions</div>
+    <table>
+      ${oc.inspection?`<tr><td>Inspection</td><td>${fmtDeadline(dl.inspection,oc.inspection)}</td></tr>`:""}
+      ${oc.financing?`<tr><td>Financement</td><td>${fmtDeadline(dl.financing,oc.financing)}</td></tr>`:""}
+      ${oc.docReview?`<tr><td>Revue de documents</td><td>${fmtDeadline(dl.docReview,oc.docReview)}${oc.docList?`<br><span style="font-size:12px;color:#666;">Documents : ${oc.docList}</span>`:""}</td></tr>`:""}
+      ${oc.other?`<tr><td>Autre condition</td><td>${fmtDeadline(dl.other,oc.other)}${oc.otherDetails?`<br><span style="font-size:12px;color:#666;">${oc.otherDetails}</span>`:""}</td></tr>`:""}
+      ${!oc.inspection&&!oc.financing&&!oc.docReview&&!oc.other?`<tr><td colspan="2" style="color:#888;">Aucune condition</td></tr>`:""}
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Dates & occupation</div>
+    <table>
+      <tr><td>Date du notaire souhaitée</td><td>${fmtDate(p.notaryDate)}</td></tr>
+      <tr><td>Date d'occupation souhaitée</td><td>${fmtDate(p.occupancyDate)}</td></tr>
+      <tr><td>Loyer si délai notaire/occupation</td><td>${p.rent==="oui"?"Oui"+(p.rentDetails?" — "+p.rentDetails:""):"Non"}</td></tr>
+    </table>
+  </div>
+
+  ${p.inclusions||p.exclusions?`<div class="section">
+    <div class="section-title">Inclusions & exclusions</div>
+    <table>
+      ${p.inclusions?`<tr><td>Inclusions</td><td>${p.inclusions}</td></tr>`:""}
+      ${p.exclusions?`<tr><td>Exclusions</td><td>${p.exclusions}</td></tr>`:""}
+    </table>
+  </div>`:""}
+
+  <div class="footer">BACHA Groupe Immobilier · Document généré par Track · ${new Date().toLocaleDateString("fr-CA")}</div>
+  </body></html>`;
+  const win = window.open("","_blank");
+  win.document.write(html);
+  win.document.close();
+  setTimeout(()=>win.print(),500);
+};
 
 function opsRenderVentes() {
   const ventesL = opsListings.filter(l=>["ferme","vendu"].includes(l.status));
