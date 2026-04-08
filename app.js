@@ -928,9 +928,10 @@ window.opsSetView = function(v) { opsView=v; renderOps(); };
 
 function opsRenderDash() {
   const activeL = opsListings.filter(l=>l.status==="ferme"||l.status==="vendu"||(l.status==="offre"&&(l.offers||[]).some(o=>o.status==="accepted")));
+  const activeP = opsPurchases.filter(p=>!OPS_PURCHASE_SOLD.includes(p.status||"active"));
   let vol = 0;
   activeL.forEach(l=>vol+=opsParsePx(l.offerPrice||l.price));
-  opsPurchases.forEach(p=>vol+=opsParsePx(p.price));
+  activeP.forEach(p=>vol+=opsParsePx(p.price));
   const comm = vol*0.02;
   let urgCount = 0;
   const allC = [];
@@ -946,7 +947,7 @@ function opsRenderDash() {
 
   return `
   <div class="ops-kpi-grid" style="grid-template-columns:repeat(5,minmax(0,1fr));">
-    <div class="ops-kpi" style="border-left-color:#0C2B5E"><div class="ops-kpi-l">Dossiers actifs</div><div class="ops-kpi-v">${activeL.length+opsPurchases.length}</div><div class="ops-kpi-s">inscriptions + achats</div></div>
+    <div class="ops-kpi" style="border-left-color:#0C2B5E"><div class="ops-kpi-l">Dossiers actifs</div><div class="ops-kpi-v">${activeL.length+activeP.length}</div><div class="ops-kpi-s">inscriptions + achats</div></div>
     <div class="ops-kpi" style="border-left-color:#378ADD"><div class="ops-kpi-l">Volume immobilier</div><div class="ops-kpi-v">${opsFmtPx(vol)}</div><div class="ops-kpi-s">valeur totale des dossiers</div></div>
     <div class="ops-kpi" style="border-left-color:#1D9E75"><div class="ops-kpi-l">Commission estimée</div><div class="ops-kpi-v">${opsFmtPx(comm)}</div><div class="ops-kpi-s">2% du volume</div></div>
     <div class="ops-kpi" style="border-left-color:${urgCount>0?"#E24B4A":"#888780"}"><div class="ops-kpi-l">Conditions urgentes</div><div class="ops-kpi-v" style="color:${urgCount>0?"#E24B4A":"var(--text)"}">${urgCount}</div><div class="ops-kpi-s">délai ≤ 3 jours</div></div>
@@ -958,8 +959,8 @@ function opsRenderDash() {
       ${activeL.length ? activeL.map(l=>{const px=opsParsePx(l.price);const displayPx=opsParsePx(l.offerPrice||l.price);const hasOffer=l.offerPrice&&l.offerPrice!==l.price;return`<div class="ops-deal-row"><div class="ops-deal-dot" style="background:${l.status==="ferme"?"#1D9E75":"#378ADD"}"></div><div class="ops-deal-info"><div class="ops-deal-addr">${l.addr}</div><div class="ops-deal-meta">${[l.seller,l.agent,OPS_STATUS_LABELS[l.status]].filter(Boolean).join(" · ")}</div></div><div><div class="ops-deal-price">${opsFmtPx(displayPx)}${hasOffer?'<span style="font-size:10px;color:#1D9E75;margin-left:4px;">offre</span>':""}</div><div class="ops-deal-comm">${displayPx?"comm. "+opsFmtPx(displayPx*.02):""}</div></div></div>`;}).join("") : `<div class="ops-empty">Aucune inscription sous contrat</div>`}
     </div>
     <div class="ops-card">
-      <div class="ops-card-hd"><span class="ops-card-title">Achats sous conditions</span><span class="ops-pill ops-pill-amber">${opsPurchases.length}</span></div>
-      ${opsPurchases.length ? opsPurchases.map(p=>{const px=opsParsePx(p.price);const pend=(p.conditions||[]).filter(c=>!c.done).length;return`<div class="ops-deal-row"><div class="ops-deal-dot" style="background:#BA7517"></div><div class="ops-deal-info"><div class="ops-deal-addr">${p.addr}</div><div class="ops-deal-meta">${[p.buyer,p.agent,pend+" cond. en attente"].filter(Boolean).join(" · ")}</div></div><div><div class="ops-deal-price">${opsFmtPx(px)}</div><div class="ops-deal-comm">${px?"comm. "+opsFmtPx(px*.02):""}</div></div></div>`;}).join("") : `<div class="ops-empty">Aucun achat en cours</div>`}
+      <div class="ops-card-hd"><span class="ops-card-title">Achats sous conditions</span><span class="ops-pill ops-pill-amber">${activeP.length}</span></div>
+      ${activeP.length ? activeP.map(p=>{const px=opsParsePx(p.price);const pend=(p.conditions||[]).filter(c=>!c.done).length;return`<div class="ops-deal-row"><div class="ops-deal-dot" style="background:#BA7517"></div><div class="ops-deal-info"><div class="ops-deal-addr">${p.addr}</div><div class="ops-deal-meta">${[p.buyer,p.agent,pend+" cond. en attente"].filter(Boolean).join(" · ")}</div></div><div><div class="ops-deal-price">${opsFmtPx(px)}</div><div class="ops-deal-comm">${px?"comm. "+opsFmtPx(px*.02):""}</div></div></div>`;}).join("") : `<div class="ops-empty">Aucun achat en cours</div>`}
     </div>
   </div>
   <div class="ops-section-label">Toutes les conditions</div>
