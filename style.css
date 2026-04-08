@@ -1276,3 +1276,29 @@ body {
 .ops-offer-btn-red:hover { background:#FCEBEB; }
 
 .ops-vente-actions { display:flex; gap:6px; flex-wrap:wrap; padding-top:.75rem; border-top:1px solid var(--border); margin-top:.75rem; }
+
+/* ── Activity system ─────────────────────────────────────────── */
+.ops-inner-tabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin-bottom:1.25rem; }
+.ops-inner-tab { padding:7px 16px; font-size:13px; font-weight:500; cursor:pointer; border:none; border-bottom:2px solid transparent; background:none; color:var(--text-2); font-family:var(--font); white-space:nowrap; }
+.ops-inner-tab:hover { color:var(--text); }
+.ops-inner-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+.ops-act-summary { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin-bottom:1.25rem; }
+.ops-act-kpi { background:var(--bg); border-radius:var(--radius); padding:.65rem .9rem; }
+.ops-act-row { display:flex; align-items:flex-start; gap:10px; padding:.875rem 1rem; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+.ops-act-row:last-child { border-bottom:none; }
+.ops-act-row:hover { background:var(--bg); }
+.ops-act-followup { background:#FFFBEB; }
+.ops-act-left { flex-shrink:0; display:flex; flex-direction:column; gap:4px; min-width:90px; }
+.ops-act-date { font-size:12px; font-weight:500; color:var(--text-2); }
+.ops-act-type-badge { font-size:10px; padding:2px 7px; border-radius:99px; font-weight:500; width:fit-content; }
+.ops-act-type-visit { background:#E6F1FB; color:#185FA5; }
+.ops-act-type-openhouse { background:#E1F5EE; color:#085041; }
+.ops-act-mid { flex:1; min-width:140px; }
+.ops-act-name { font-size:13px; font-weight:500; color:var(--text); margin-bottom:2px; }
+.ops-act-ratings { display:flex; gap:6px; flex-wrap:wrap; align-items:center; flex-shrink:0; }
+.ops-act-star { font-size:11px; padding:2px 7px; border-radius:99px; background:var(--bg); border:1px solid var(--border); color:var(--text-2); }
+.ops-act-right { display:flex; flex-direction:column; gap:4px; align-items:flex-end; flex-shrink:0; }
+.ops-act-actions { display:flex; gap:4px; flex-wrap:wrap; width:100%; padding-top:6px; border-top:1px solid var(--border); margin-top:4px; }
+@media (max-width:700px) {
+  .ops-act-summary { grid-template-columns:repeat(3,1fr); }
+}
