@@ -177,7 +177,7 @@ function opsCondInfo(c) {
   if (d<=7) return {cls:"ops-cb-warn",txt:d+"j restants",urg:false};
   return {cls:"ops-cb-ok",txt:d+"j restants",urg:false};
 }
-function opsFmtDate(ds) { if (!ds) return "—"; const d=new Date(ds); return d.toLocaleDateString("fr-CA",{day:"numeric",month:"short"}); }
+function opsFmtDate(ds) { if (!ds) return "—"; const [y,m,dd]=ds.slice(0,10).split("-").map(Number); const dt=new Date(y,m-1,dd); return dt.toLocaleDateString("fr-CA",{day:"numeric",month:"short"}); }
 function opsHasUrg(conds) { return (conds||[]).some(c=>!c.done&&c.date&&opsDaysUntil(c.date)<=3&&opsDaysUntil(c.date)>=0); }
 function opsLProg(l) { const tot=OPS_ALL_TASKS.length; const dn=OPS_ALL_TASKS.filter(t=>(l.checklist||{})[t.id]).length; return {tot,dn,pct:tot?Math.round(dn/tot*100):0}; }
 function opsPProg(p) { const c=p.conditions||[]; return {tot:c.length,dn:c.filter(x=>x.done).length,pct:c.length?Math.round(c.filter(x=>x.done).length/c.length*100):0}; }
@@ -652,7 +652,7 @@ window.opsGenerateOfferPDF = function(lid, oid) {
   const l = opsListings.find(x=>x.id===lid);
   const o = (l?.offers||[]).find(x=>x.id===oid);
   if (!l||!o) return;
-  const fmtDate = ds => { if(!ds) return "—"; const d=new Date(ds); return d.toLocaleDateString("fr-CA",{day:"numeric",month:"long",year:"numeric"}); };
+  const fmtDate = ds => { if(!ds) return "—"; const [y,m,d]=ds.slice(0,10).split("-").map(Number); const dt=new Date(y,m-1,d); return dt.toLocaleDateString("fr-CA",{day:"numeric",month:"long",year:"numeric"}); };
   const fmtDeadline = (ds,days) => { if(!ds&&!days) return "—"; if(ds) return fmtDate(ds)+(days?` (${days}j)`:""); return `${days} jours à compter de l'acceptation`; };
   const statusLabels={pending:"En attente",accepted:"Acceptée",second:"2e rang",refused:"Refusée"};
   const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
@@ -976,7 +976,7 @@ function opsOffersBlock(l) {
     second:   {label:"2e rang",     color:"#BA7517", bg:"#FAEEDA"},
     refused:  {label:"Refusée",     color:"#888780", bg:"#F1EFE8"},
   };
-  const fmtDate = ds => { if(!ds) return "—"; const d=new Date(ds); return d.toLocaleDateString("fr-CA",{day:"numeric",month:"short"}); };
+  const fmtDate = ds => { if(!ds) return "—"; const [y,m,d]=ds.slice(0,10).split("-").map(Number); const dt=new Date(y,m-1,d); return dt.toLocaleDateString("fr-CA",{day:"numeric",month:"short"}); };
 
   const rows = offers.map(o=>{
     const sc = statusConfig[o.status]||statusConfig.pending;
