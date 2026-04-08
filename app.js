@@ -475,6 +475,14 @@ window.opsToggleCond = async function(type, eid, cid) {
       showToast("Toutes les conditions réalisées — statut mis à jour ✓");
     }
   }
+  // For listings: if all conditions are now done, auto-advance to "vente ferme"
+  if (type==="l") {
+    const allDone = conds.length > 0 && conds.every(c=>c.done);
+    if (allDone && rec.status==="offre") {
+      update.status = "ferme";
+      showToast("Toutes les conditions réalisées — Vente ferme ✓");
+    }
+  }
   await updateDoc(doc(db,col,eid),update);
 };
 
@@ -911,7 +919,7 @@ function renderOps() {
       <button class="ops-tab${opsView==="dash"?" active":""}" onclick="opsSetView('dash')">Vue d'ensemble</button>
       <button class="ops-tab${opsView==="listings"?" active":""}" onclick="opsSetView('listings')">Inscriptions <span class="ops-tab-count">${opsListings.length}</span></button>
       <button class="ops-tab${opsView==="purchases"?" active":""}" onclick="opsSetView('purchases')">Achats <span class="ops-tab-count">${opsPurchases.length}</span></button>
-      <button class="ops-tab${opsView==="ventes"?" active":""}" onclick="opsSetView('ventes')">Ventes <span class="ops-tab-count">${opsListings.filter(l=>["ferme","vendu"].includes(l.status)).length}</span></button>
+      <button class="ops-tab${opsView==="ventes"?" active":""}" onclick="opsSetView('ventes')">Ventes <span class="ops-tab-count">${opsListings.filter(l=>["ferme","vendu"].includes(l.status)).length + opsPurchases.filter(p=>OPS_PURCHASE_SOLD.includes(p.status||"active")).length}</span></button>
     </div>`;
 
   ha.innerHTML = `
@@ -1279,6 +1287,11 @@ function opsRenderVentes() {
           <span style="font-size:12px;font-weight:500;padding:3px 10px;border-radius:99px;background:${statusColor}20;color:${statusColor};border:1px solid ${statusColor}40;">${OPS_STATUS_LABELS[l.status]}</span>
         </div>
       </div>
+      <div class="ops-vente-actions">
+        <button class="ops-offer-btn" onclick="opsVenteEditListing('${l.id}')">Modifier</button>
+        <button class="ops-offer-btn ops-offer-btn-amber" onclick="opsVenteSendBack('listing','${l.id}')">↩ Renvoyer aux inscriptions</button>
+        <button class="ops-offer-btn ops-offer-btn-red" onclick="opsDeleteListing('${l.id}')">Supprimer</button>
+      </div>
     </div>`;
   }).join("");
 
@@ -1311,6 +1324,11 @@ function opsRenderVentes() {
           <span style="font-size:12px;font-weight:500;padding:3px 10px;border-radius:99px;background:${statusColor}20;color:${statusColor};border:1px solid ${statusColor}40;">${OPS_PURCHASE_STATUS_LABELS[p.status]}</span>
         </div>
       </div>
+      <div class="ops-vente-actions">
+        <button class="ops-offer-btn" onclick="opsOpenNewPurchase('${p.id}')">Modifier</button>
+        <button class="ops-offer-btn ops-offer-btn-amber" onclick="opsVenteSendBack('purchase','${p.id}')">↩ Renvoyer aux achats</button>
+        <button class="ops-offer-btn ops-offer-btn-red" onclick="opsDeletePurchase('${p.id}')">Supprimer</button>
+      </div>
     </div>`;
   }).join("");
 
@@ -1323,6 +1341,32 @@ function opsRenderVentes() {
     ${ventesL.length?`<div style="font-size:11px;font-weight:500;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem;">Inscriptions</div><div class="ops-card" style="margin-bottom:1rem;">${listingRows}</div>`:""}
     ${ventesP.length?`<div style="font-size:11px;font-weight:500;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem;">Achats</div><div class="ops-card">${purchaseRows}</div>`:""}`;
 }
+
+window.opsVenteSendBack = async function(type, id) {
+  if (type==="listing") {
+    await updateDoc(doc(db,"ops_listings",id),{status:"offre",updatedAt:serverTimestamp()});
+    opsActiveLid=id; opsView="listings";
+    showToast("Dossier renvoyé aux inscriptions ✓");
+  } else {
+    await updateDoc(doc(db,"ops_purchases",id),{status:"offre",updatedAt:serverTimestamp()});
+    opsActivePid=id; opsView="purchases";
+    showToast("Dossier renvoyé aux achats ✓");
+  }
+};
+
+window.opsVenteEditListing = function(lid) {
+  openModal("lm");
+  const l = opsListings.find(x=>x.id===lid);
+  if (!l) return;
+  document.getElementById("lm-title").textContent="Modifier l'inscription";
+  document.getElementById("lm-addr").value=l.addr||"";
+  document.getElementById("lm-seller").value=l.seller||"";
+  document.getElementById("lm-price").value=l.price||"";
+  document.getElementById("lm-agent").value=l.agent||"Karim";
+  document.getElementById("lm-status").value=l.status||"active";
+  // Store edit id for save
+  window._opsEditListingId = lid;
+};
 
 window.opsUpdateNotaryDate = async function(lid, val) {
   await updateDoc(doc(db,"ops_listings",lid),{notaryDate:val,updatedAt:serverTimestamp()});
