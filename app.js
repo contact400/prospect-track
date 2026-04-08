@@ -917,8 +917,8 @@ function renderOps() {
   const tabs = `
     <div class="ops-tabs">
       <button class="ops-tab${opsView==="dash"?" active":""}" onclick="opsSetView('dash')">Vue d'ensemble</button>
-      <button class="ops-tab${opsView==="listings"?" active":""}" onclick="opsSetView('listings')">Inscriptions <span class="ops-tab-count">${opsListings.length}</span></button>
-      <button class="ops-tab${opsView==="purchases"?" active":""}" onclick="opsSetView('purchases')">Achats <span class="ops-tab-count">${opsPurchases.length}</span></button>
+      <button class="ops-tab${opsView==="listings"?" active":""}" onclick="opsSetView('listings')">Inscriptions <span class="ops-tab-count">${opsListings.filter(l=>!["ferme","vendu"].includes(l.status)).length}</span></button>
+      <button class="ops-tab${opsView==="purchases"?" active":""}" onclick="opsSetView('purchases')">Achats <span class="ops-tab-count">${opsPurchases.filter(p=>!OPS_PURCHASE_SOLD.includes(p.status||"active")).length}</span></button>
       <button class="ops-tab${opsView==="ventes"?" active":""}" onclick="opsSetView('ventes')">Ventes <span class="ops-tab-count">${opsListings.filter(l=>["ferme","vendu"].includes(l.status)).length + opsPurchases.filter(p=>OPS_PURCHASE_SOLD.includes(p.status||"active")).length}</span></button>
     </div>`;
 
@@ -976,9 +976,10 @@ function opsRenderDash() {
 }
 
 function opsRenderListings() {
-  if (!opsListings.length) return `<div class="empty-state"><div class="empty-icon">◩</div><div class="empty-title">Aucune inscription</div><div class="empty-sub">Cliquez sur "+ Nouvelle inscription"</div></div>`;
-  if (!opsActiveLid || !opsListings.find(x=>x.id===opsActiveLid)) opsActiveLid = opsListings[0].id;
-  const l = opsListings.find(x=>x.id===opsActiveLid);
+  const activeListings = opsListings.filter(l=>!["ferme","vendu"].includes(l.status));
+  if (!activeListings.length) return `<div class="empty-state"><div class="empty-icon">◩</div><div class="empty-title">Aucune inscription active</div><div class="empty-sub">Les ventes conclues se trouvent dans l'onglet Ventes.</div></div>`;
+  if (!opsActiveLid || !activeListings.find(x=>x.id===opsActiveLid)) opsActiveLid = activeListings[0].id;
+  const l = activeListings.find(x=>x.id===opsActiveLid);
   const p = opsLProg(l);
   const bc = p.pct===100?"#1D9E75":p.pct>50?"#378ADD":"#BA7517";
 
@@ -1043,9 +1044,10 @@ function opsRenderListings() {
 }
 
 function opsRenderPurchases() {
-  if (!opsPurchases.length) return `<div class="empty-state"><div class="empty-icon">◩</div><div class="empty-title">Aucun achat</div><div class="empty-sub">Cliquez sur "+ Nouvel achat"</div></div>`;
-  if (!opsActivePid || !opsPurchases.find(x=>x.id===opsActivePid)) opsActivePid = opsPurchases[0].id;
-  const p = opsPurchases.find(x=>x.id===opsActivePid);
+  const activePurchases = opsPurchases.filter(p=>!OPS_PURCHASE_SOLD.includes(p.status||"active"));
+  if (!activePurchases.length) return `<div class="empty-state"><div class="empty-icon">◩</div><div class="empty-title">Aucun achat actif</div><div class="empty-sub">Les achats conclus se trouvent dans l'onglet Ventes.</div></div>`;
+  if (!opsActivePid || !activePurchases.find(x=>x.id===opsActivePid)) opsActivePid = activePurchases[0].id;
+  const p = activePurchases.find(x=>x.id===opsActivePid);
   const pr = opsPProg(p);
   const r=32; const circ=2*Math.PI*r; const off=circ-(pr.pct/100)*circ;
   const rc = pr.pct===100?"#1D9E75":pr.pct>50?"#378ADD":"#BA7517";
@@ -1053,11 +1055,10 @@ function opsRenderPurchases() {
   const pStatusColor = OPS_PURCHASE_STATUS_COLORS[pStatus]||"#888780";
   const pStatusLabel = OPS_PURCHASE_STATUS_LABELS[pStatus]||"Actif";
 
-  const tabs = opsPurchases.map(pu=>{
+  const tabs = activePurchases.map(pu=>{
     const short=pu.addr.length>22?pu.addr.substring(0,20)+"…":pu.addr;
     const urg=opsHasUrg(pu.conditions);
-    const isSold=OPS_PURCHASE_SOLD.includes(pu.status||"active");
-    return `<div class="ops-rec-tab${opsActivePid===pu.id?" active":""}" onclick="opsSetPTab('${pu.id}')">${short}${urg?'<span class="ops-urgdot"></span>':""}${isSold?'<span style="width:7px;height:7px;border-radius:50%;background:#534AB7;display:inline-block;margin-left:3px;"></span>':""}</div>`;
+    return `<div class="ops-rec-tab${opsActivePid===pu.id?" active":""}" onclick="opsSetPTab('${pu.id}')">${short}${urg?'<span class="ops-urgdot"></span>':""}</div>`;
   }).join("");
 
   // Status progression buttons
