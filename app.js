@@ -485,23 +485,42 @@ window.opsAcceptOffer = async function(lid, oid) {
   const l = opsListings.find(x=>x.id===lid);
   if (!l) return;
   const acceptedAt = new Date().toISOString();
+  const base = new Date(acceptedAt);
+
   const offers = (l.offers||[]).map(o=>{
     if (o.id !== oid) return o;
     const deadlines = {};
-    const base = new Date(acceptedAt);
     if (o.conditions.inspection) { const d=new Date(base); d.setDate(d.getDate()+parseInt(o.conditions.inspection)); deadlines.inspection=d.toISOString().slice(0,10); }
-    if (o.conditions.financing) { const d=new Date(base); d.setDate(d.getDate()+parseInt(o.conditions.financing)); deadlines.financing=d.toISOString().slice(0,10); }
-    if (o.conditions.docReview) { const d=new Date(base); d.setDate(d.getDate()+parseInt(o.conditions.docReview)); deadlines.docReview=d.toISOString().slice(0,10); }
-    if (o.conditions.other) { const d=new Date(base); d.setDate(d.getDate()+parseInt(o.conditions.other)); deadlines.other=d.toISOString().slice(0,10); }
+    if (o.conditions.financing)  { const d=new Date(base); d.setDate(d.getDate()+parseInt(o.conditions.financing));  deadlines.financing=d.toISOString().slice(0,10); }
+    if (o.conditions.docReview)  { const d=new Date(base); d.setDate(d.getDate()+parseInt(o.conditions.docReview));  deadlines.docReview=d.toISOString().slice(0,10); }
+    if (o.conditions.other)      { const d=new Date(base); d.setDate(d.getDate()+parseInt(o.conditions.other));      deadlines.other=d.toISOString().slice(0,10); }
     return {...o, status:"accepted", acceptedAt, deadlines};
   });
+
   const accepted = offers.find(o=>o.id===oid);
+  const dl = accepted.deadlines || {};
+
+  // Auto-populate the conditions array from accepted offer deadlines
+  const autoConditions = [];
+  if (dl.financing)  autoConditions.push({id:"ac_fin",  name:"Financement",         date:dl.financing,  done:false, fromOffer:true});
+  if (dl.inspection) autoConditions.push({id:"ac_insp", name:"Inspection",           date:dl.inspection, done:false, fromOffer:true});
+  if (dl.docReview)  autoConditions.push({id:"ac_doc",  name:"Revue de documents",   date:dl.docReview,  done:false, fromOffer:true});
+  if (dl.other)      autoConditions.push({id:"ac_oth",  name:accepted.conditions.otherDetails||"Autre condition", date:dl.other, done:false, fromOffer:true});
+
+  // Merge: keep any manually added conditions that are NOT fromOffer, replace fromOffer ones
+  const existing = (l.conditions||[]).filter(c=>!c.fromOffer);
+  const mergedConditions = [...autoConditions, ...existing];
+
   await updateDoc(doc(db,"ops_listings",lid),{
-    offers, offerPrice: accepted.price,
-    status:"offre", updatedAt:serverTimestamp()
+    offers,
+    conditions: mergedConditions,
+    offerPrice: accepted.price,
+    notaryDate: accepted.notaryDate || l.notaryDate || "",
+    status: "offre",
+    updatedAt: serverTimestamp()
   });
   closeAllModals();
-  showToast("Offre acceptée — délais calculés ✓");
+  showToast("Offre acceptée — conditions et délais mis à jour ✓");
 };
 
 window.opsSetOfferStatus = async function(lid, oid, status) {
@@ -591,7 +610,23 @@ window.opsUpdateOffer = async function(lid, oid) {
     }
     return updated;
   });
-  await updateDoc(doc(db,"ops_listings",lid),{offers,updatedAt:serverTimestamp()});
+
+  // Re-sync auto conditions if the accepted offer was updated
+  const acceptedOffer = offers.find(o=>o.status==="accepted");
+  let updatePayload = {offers, updatedAt:serverTimestamp()};
+  if (acceptedOffer && acceptedOffer.deadlines) {
+    const dl = acceptedOffer.deadlines;
+    const l = opsListings.find(x=>x.id===lid);
+    const autoConditions = [];
+    if (dl.financing)  autoConditions.push({id:"ac_fin",  name:"Financement",       date:dl.financing,  done:(l.conditions||[]).find(c=>c.id==="ac_fin")?.done||false,  fromOffer:true});
+    if (dl.inspection) autoConditions.push({id:"ac_insp", name:"Inspection",         date:dl.inspection, done:(l.conditions||[]).find(c=>c.id==="ac_insp")?.done||false, fromOffer:true});
+    if (dl.docReview)  autoConditions.push({id:"ac_doc",  name:"Revue de documents", date:dl.docReview,  done:(l.conditions||[]).find(c=>c.id==="ac_doc")?.done||false,  fromOffer:true});
+    if (dl.other)      autoConditions.push({id:"ac_oth",  name:acceptedOffer.conditions.otherDetails||"Autre condition", date:dl.other, done:(l.conditions||[]).find(c=>c.id==="ac_oth")?.done||false, fromOffer:true});
+    const existing = (l.conditions||[]).filter(c=>!c.fromOffer);
+    updatePayload.conditions = [...autoConditions, ...existing];
+  }
+
+  await updateDoc(doc(db,"ops_listings",lid), updatePayload);
   closeAllModals();
   showToast("Offre mise à jour ✓");
 };
