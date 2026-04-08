@@ -33,6 +33,20 @@ let opsListingView = "checklist"; // "checklist" | "conditions" | "offers" | "ac
 let opsActivityCache = {}; // lid -> array of activity docs
 let unsubscribeActivity = {};
 
+function opsSubscribeActivity(lid) {
+  if (unsubscribeActivity[lid]) return;
+  const q = query(collection(db, "ops_listings", lid, "activity"), orderBy("date", "desc"));
+  unsubscribeActivity[lid] = onSnapshot(q, snap => {
+    opsActivityCache[lid] = snap.docs.map(d => ({id: d.id, ...d.data()}));
+    if (document.getElementById("view-ops")?.classList.contains("active") &&
+        opsActiveLid === lid && opsListingView === "activity") {
+      renderOps();
+    }
+  });
+}
+
+function opsGetActivity(lid) { return opsActivityCache[lid] || []; }
+
 // ── Bonus structures ───────────────────────────────────────
 const BONUS_STRUCTURES = {
   "benjamin": { tiers: [{ doors:120, sale:33, purchase:25, label:"Tier 1" },{ doors:170, sale:45, purchase:35, label:"Tier 2" }] },
