@@ -77,9 +77,10 @@ const OPS_PHASES = [
     {id:"t106",name:"Confirmation du rendez-vous le matin même de l'évaluation",who:"Karim",tool:"Téléphone / SMS",time:"Matin du RV",det:"Appeler ou texter le vendeur pour confirmer le rendez-vous. S'assurer que la propriété est accessible."},
     {id:"t107",name:"Évaluation, signature du contrat & book photographe",who:"Karim",tool:"En personne / EZmax",time:"Lors du RV",det:"Faire la visite complète, présenter le CMA, signer le contrat de courtage et la déclaration du vendeur. Booker le photographe."},
     {id:"t108",name:"TEMPLATE TEXT — Créer groupe WhatsApp et envoyer message d'introduction",who:"Sara",tool:"WhatsApp",time:"Après signature",det:"Créer le groupe WhatsApp avec le vendeur, Karim et Sara. Envoyer le message d'introduction BACHA."},
-    {id:"t109",name:"TEMPLATE TEXT — Courriel détaillant les prochaines étapes (photo, affichage, visite libre)",who:"Sara",tool:"Gmail / FUB",time:"Après signature",det:"Envoyer le courriel qui détaille les prochaines étapes : séance photo, date d'affichage prévue et visite libre."},
-    {id:"t110",name:"Sécuriser certificat de localisation et taxes municipales et scolaires",who:"Sara",tool:"Notaire / Ville",time:"Dans les 48h",det:"Obtenir le certificat de localisation (vérifier s'il est à jour) et les taxes municipales et scolaires pour Centris."},
-    {id:"t111",name:"TEMPLATE TEXT — Courriel détaillant les prochaines étapes avec les dates",who:"Sara",tool:"Gmail / FUB",time:"Dès que dates confirmées",det:"Envoyer le courriel final avec toutes les dates confirmées : photo, affichage, visite libre."},
+    {id:"t109",name:"TEMPLATE TEXT — Courriel récapitulatif complet au vendeur",who:"Sara",tool:"Gmail / FUB",time:"Après signature",det:"Envoyer un seul courriel complet au vendeur incluant : (1) les prochaines étapes avec dates (photo, affichage, visite libre), (2) la demande du certificat de localisation, (3) la demande des taxes municipales et scolaires, (4) la demande du relevé hypothécaire."},
+    {id:"t110b",name:"Faire la demande pour soumission d'un nouveau certificat de localisation (au besoin)",who:"Sara",tool:"Notaire / Arpenteur",time:"Après signature",det:"Vérifier si le certificat de localisation existant est à jour. Si non, faire la demande auprès de l'arpenteur ou du notaire."},
+    {id:"t110c",name:"Créer le fichier Drive pour les documents du listing",who:"Sara",tool:"Google Drive",time:"Après signature",det:"Créer le dossier Google Drive dédié à ce listing et y organiser les sous-dossiers : contrats, photos, documents légaux, marketing."},
+    {id:"t110d",name:"Remplir l'inscription dans la GED",who:"Sara",tool:"GED",time:"Avant affichage",det:"Saisir toutes les informations du listing dans la GED. Vérifier que tous les champs obligatoires sont complétés avant la mise en ligne."},
     {id:"t112",name:"Préparer recherche automatisée pour le secteur de la propriété",who:"Karim",tool:"Matrix Centris",time:"Avant affichage",det:"Configurer une alerte automatisée sur Matrix pour identifier les acheteurs potentiels dans le secteur."},
     {id:"t113",name:"Suite à la réception des photos — Préparation du listing et des publications Instagram (story, post, vidéo)",who:"Sara / Benjamin",tool:"Centris / Canva / Meta",time:"Dès réception des photos",det:"Préparer et publier le listing sur Centris. Créer les publications Instagram : story, post et vidéo de la propriété."},
     {id:"t114",name:"TEMPLATE CANVA — Préparation et commande des flyers (distribution locale & visites libres)",who:"Sara / Benjamin",tool:"Canva / Imprimeur",time:"Avant affichage",det:"Préparer les flyers avec le template Canva et les envoyer à l'impression pour la distribution locale et les visites libres."},
@@ -108,14 +109,24 @@ const OPS_PHASES = [
     {id:"t403",name:"Faire les suivis nécessaires en fonction de Track",who:"Karim / Sara",tool:"Track app",time:"En continu",det:"Suivre les conditions et les délais tels qu'indiqués dans Track. Effectuer les relances et actions requises à chaque étape."},
   ]},
   {id:"p5",label:"Phase 5 — Réalisation des conditions",color:"#0F6E56",tasks:[
-    {id:"t501",name:"Suivi des délais de conditions",who:"Sara",tool:"Track app / Calendrier",time:"Quotidiennement",det:"Vérifier quotidiennement les dates limites de chaque condition. Envoyer des rappels 48h avant chaque échéance."},
-    {id:"t502",name:"Rappel courtier acheteur toutes les 4 jours",who:"Karim",tool:"Téléphone / courriel",time:"Toutes les 4 jours",det:"Contacter le courtier acheteur pour suivre l'avancement de chaque condition. Documenter tous les contacts."},
     {id:"t503",name:"Coordination de l'inspection préachat",who:"Sara",tool:"Téléphone / Immocontact",time:"Dans les 3 jours",det:"Confirmer l'inspecteur, la date et l'heure avec les deux parties."},
     {id:"t504",name:"Révision du rapport d'inspection",who:"Karim",tool:"Courriel / en personne",time:"Dans les 24h du rapport",det:"Analyser les déficiences soulevées. Conseiller les vendeurs sur la stratégie à adopter."},
     {id:"t505",name:"Confirmation de l'approbation du financement",who:"Karim",tool:"Téléphone / courriel",time:"Avant la date limite",det:"Exiger une confirmation écrite de l'institution financière avant la date limite de la condition."},
     {id:"t506",name:"Obtention de la levée des conditions",who:"Karim",tool:"EZmax / DocuSign",time:"À la date limite",det:"S'assurer que les deux parties signent la levée des conditions. La transaction est maintenant ferme."},
-    {id:"t507",name:"Transmission des documents au notaire",who:"Sara",tool:"Courriel / portail notaire",time:"Dès l'offre ferme",det:"Envoyer au notaire : acte de vente, DV, certificat de localisation, promesse d'achat et levée des conditions."},
-    {id:"t508",name:"Communication continue avec le vendeur",who:"Karim",tool:"Téléphone / WhatsApp",time:"En continu",det:"Tenir le vendeur informé à chaque étape. Éviter les silences prolongés."},
+    {id:"t506b",name:"Envoie le rapport suivi des conditions",who:"Sara",tool:"Gmail / Track",time:"À la levée des conditions",det:"Envoyer un rapport de suivi des conditions aux vendeurs confirmant que toutes les conditions ont été réalisées."},
+    {id:"t705",name:"Demande d'avis Google",who:"Karim",tool:"SMS / courriel",time:"Dès la levée des conditions",det:"Envoyer le lien direct Google Review. Relancer une fois si nécessaire. Profiter du moment où le vendeur est enthousiaste."},
+    {id:"t507",name:"Transmission des documents au notaire",who:"Sara",tool:"Courriel / portail notaire",time:"Dès l'offre ferme",det:"Envoyer au notaire les documents requis. Cocher chaque document transmis.",subdocs:[
+      {id:"sd01",name:"Document 1 — Placeholder"},
+      {id:"sd02",name:"Document 2 — Placeholder"},
+      {id:"sd03",name:"Document 3 — Placeholder"},
+      {id:"sd04",name:"Document 4 — Placeholder"},
+      {id:"sd05",name:"Document 5 — Placeholder"},
+      {id:"sd06",name:"Document 6 — Placeholder"},
+      {id:"sd07",name:"Document 7 — Placeholder"},
+      {id:"sd08",name:"Document 8 — Placeholder"},
+      {id:"sd09",name:"Document 9 — Placeholder"},
+      {id:"sd10",name:"Document 10 — Placeholder"},
+    ]},
   ]},
   {id:"p6",label:"Phase 6 — Préparation au notaire",color:"#633806",tasks:[
     {id:"t601",name:"Confirmation de la date du rendez-vous notarié",who:"Sara",tool:"Téléphone / courriel",time:"3–5 jours avant",det:"Confirmer la date et l'heure avec le notaire ET le vendeur. Ajouter au calendrier."},
@@ -128,12 +139,10 @@ const OPS_PHASES = [
     {id:"t702",name:"Fermeture administrative dans FUB et Track",who:"Sara",tool:"FUB / Track app",time:"Jour de signature",det:"Mettre le statut à Vendu dans FUB et Track. Archiver le prix final, la commission et l'agent responsable."},
     {id:"t703",name:"Remise des clés",who:"Karim / Benjamin / Afshin",tool:"En personne",time:"Jour de possession",det:"Remettre les clés, télécommandes et codes d'accès à l'acheteur. Confirmer la libération de la propriété."},
     {id:"t704",name:"Envoi cadeau / mot de remerciement",who:"Karim",tool:"Cadeau / carte manuscrite",time:"Dans les 3 jours",det:"Budget 50–150$. Un geste apprécié qui génère des références."},
-    {id:"t705",name:"Demande d'avis Google",who:"Karim",tool:"SMS / courriel",time:"3–5 jours après",det:"Envoyer le lien direct Google Review. Relancer une fois si nécessaire."},
     {id:"t706",name:"Suivi post-transaction",who:"Karim",tool:"Téléphone / WhatsApp",time:"2–4 semaines après",det:"Appel de suivi : déménagement ok? Projet d'achat en vue? Demander des références."},
     {id:"t707",name:"Ajouter à la liste de nurture long terme",who:"Sara",tool:"FUB / Mailchimp",time:"Dans la semaine",det:"Étiqueter le contact comme client passé dans FUB et l'ajouter aux campagnes de nurture annuelles."},
   ]},
 ];
-
 const OPS_ALL_TASKS = OPS_PHASES.flatMap(p => p.tasks);
 const OPS_STATUS_LABELS = {active:"Actif",offre:"Offre reçue",ferme:"Vente ferme",vendu:"Vendu"};
 const OPS_STATUS_COLORS = {active:"#1D9E75",offre:"#185FA5",ferme:"#534AB7",vendu:"#888780"};
@@ -1084,6 +1093,15 @@ function opsRenderListings() {
         ${ph.tasks.map(t=>{
           taskNum++;
           const done=(l.checklist||{})[t.id];
+          const subdocsHtml = t.subdocs ? `<div style="margin-top:8px;padding-left:4px;border-left:2px solid var(--border);">
+            ${t.subdocs.map(sd=>{
+              const sdDone=(l.checklist||{})[sd.id];
+              return `<div style="display:flex;align-items:center;gap:8px;padding:4px 8px;" class="ops-task${sdDone?" done":""}">
+                <input type="checkbox" ${sdDone?"checked":""} onchange="opsToggleTask('${l.id}','${sd.id}',this.checked)" style="width:14px;height:14px;">
+                <span style="font-size:12px;${sdDone?"text-decoration:line-through;color:var(--text-3);":""}">${sd.name}</span>
+              </div>`;
+            }).join("")}
+          </div>` : "";
           return `<div class="ops-task${done?" done":""}">
             <span style="font-size:11px;font-weight:700;color:${done?"var(--text-3)":ph.color};width:22px;flex-shrink:0;padding-top:1px;text-align:right;">${taskNum}</span>
             <input type="checkbox" ${done?"checked":""} onchange="opsToggleTask('${l.id}','${t.id}',this.checked)">
@@ -1091,6 +1109,7 @@ function opsRenderListings() {
               <div class="ops-task-name">${t.name}</div>
               <div class="ops-task-meta">${[t.who,t.tool,t.time].filter(Boolean).join(" · ")}</div>
               ${t.det?`<div class="ops-task-det">${t.det}</div>`:""}
+              ${subdocsHtml}
             </div>
           </div>`;
         }).join("")}
