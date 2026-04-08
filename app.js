@@ -29,6 +29,9 @@ let opsPurchases = [];
 let opsView = "dash"; // "dash" | "listings" | "purchases"
 let opsActiveLid = null;
 let opsActivePid = null;
+let opsListingView = "checklist"; // "checklist" | "conditions" | "offers" | "activity"
+let opsActivityCache = {}; // lid -> array of activity docs
+let unsubscribeActivity = {};
 
 // ── Bonus structures ───────────────────────────────────────
 const BONUS_STRUCTURES = {
@@ -975,6 +978,29 @@ function opsRenderDash() {
   <div class="ops-card">${allC.length ? allC.map(({src,type,c,i})=>`<div class="ops-cond-row-dash"><span class="ops-pill ${type==="l"?"ops-pill-green":"ops-pill-amber"}">${type==="l"?"Inscription":"Achat"}</span><span class="ops-cond-src">${src.length>28?src.substring(0,26)+"…":src}</span><span class="ops-cond-nm">${c.name}</span><span class="ops-cond-dt">${opsFmtDate(c.date)}</span><span class="ops-cond-badge ${i.cls}">${i.txt}</span></div>`).join("") : `<div style="padding:2rem;text-align:center;font-size:13px;color:var(--text-3);">Aucune condition enregistrée</div>`}</div>`;
 }
 
+function opsFollowUpQueue() {
+  const pending = [];
+  opsListings.forEach(l=>{
+    (opsActivityCache[l.id]||[]).filter(a=>a.followUpRequired&&!a.followUpDone).forEach(a=>{
+      pending.push({listing:l.addr, name:a.visitorName||a.agentName||"Visiteur", date:a.date, lid:l.id, aid:a.id, phone:a.phone||""});
+    });
+  });
+  if (!pending.length) return "";
+  const rows = pending.sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(p=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:.65rem 1rem;border-bottom:1px solid var(--border);">
+      <div style="width:8px;height:8px;border-radius:50%;background:#BA7517;flex-shrink:0;"></div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;font-weight:500;color:var(--text);">${p.name}</div>
+        <div style="font-size:11px;color:var(--text-3);">${p.listing}${p.date?" · "+p.date:""}${p.phone?" · "+p.phone:""}</div>
+      </div>
+      <button class="ops-offer-btn ops-offer-btn-green" onclick="opsMarkFollowUpDone('${p.lid}','${p.aid}')">✓ Fait</button>
+    </div>`).join("");
+  return `<div class="ops-card" style="margin-bottom:1.5rem;">
+    <div class="ops-card-hd"><span class="ops-card-title" style="color:#BA7517;">Suivis requis (${pending.length})</span></div>
+    ${rows}
+  </div>`;
+}
+
 function opsRenderListings() {
   const activeListings = opsListings.filter(l=>!["ferme","vendu"].includes(l.status));
   if (!activeListings.length) return `<div class="empty-state"><div class="empty-icon">◩</div><div class="empty-title">Aucune inscription active</div><div class="empty-sub">Les ventes conclues se trouvent dans l'onglet Ventes.</div></div>`;
@@ -989,6 +1015,29 @@ function opsRenderListings() {
     return `<div class="ops-rec-tab${opsActiveLid===li.id?" active":""}" onclick="opsSetLTab('${li.id}')">${short} <span class="ops-tab-pct">${pr.pct}%</span>${urg?'<span class="ops-urgdot"></span>':""}</div>`;
   }).join("");
 
+  // Subscribe to activity for this listing
+  opsSubscribeActivity(l.id);
+
+  // Inner view tabs
+  const innerTabs = `<div class="ops-inner-tabs">
+    <button class="ops-inner-tab${opsListingView==="checklist"?" active":""}" onclick="opsSetListingView('checklist')">SOP Checklist</button>
+    <button class="ops-inner-tab${opsListingView==="conditions"?" active":""}" onclick="opsSetListingView('conditions')">Conditions</button>
+    <button class="ops-inner-tab${opsListingView==="offers"?" active":""}" onclick="opsSetListingView('offers')">Offres <span class="ops-tab-count">${(l.offers||[]).length}</span></button>
+    <button class="ops-inner-tab${opsListingView==="activity"?" active":""}" onclick="opsSetListingView('activity')">Activité <span class="ops-tab-count">${opsGetActivity(l.id).length}</span></button>
+  </div>`;
+
+  // Route to correct inner view
+  if (opsListingView === "conditions") {
+    return `<div class="ops-rec-tabs">${tabs}</div>${listingHdr}${innerTabs}${opsCondsBlock("l", l)}`;
+  }
+  if (opsListingView === "offers") {
+    return `<div class="ops-rec-tabs">${tabs}</div>${listingHdr}${innerTabs}${opsOffersBlock(l)}`;
+  }
+  if (opsListingView === "activity") {
+    return `<div class="ops-rec-tabs">${tabs}</div>${listingHdr}${innerTabs}${opsActivityView(l)}`;
+  }
+
+  // Default: checklist
   const condsHtml = opsCondsBlock("l", l);
 
   let phasesHtml = "";
@@ -1006,9 +1055,7 @@ function opsRenderListings() {
       </div></div>`;
   });
 
-  return `
-    <div class="ops-rec-tabs">${tabs}</div>
-    <div class="ops-listing-hdr">
+  const listingHdr = `<div class="ops-listing-hdr">
       <div>
         <div class="ops-addr-big">${l.addr} <span class="ops-status-badge" style="background:${OPS_STATUS_COLORS[l.status]}20;color:${OPS_STATUS_COLORS[l.status]};border:1px solid ${OPS_STATUS_COLORS[l.status]}40">${OPS_STATUS_LABELS[l.status]}</span></div>
         <div class="ops-listing-sub">${[l.seller,l.agent].filter(Boolean).join(" · ")}</div>
@@ -1038,8 +1085,14 @@ function opsRenderListings() {
       <div class="ops-stat"><div class="ops-stat-l">Progrès</div><div class="ops-stat-v">${p.pct}%</div></div>
     </div>
     <div class="ops-pbar-wrap"><div class="ops-pbar-fill" style="width:${p.pct}%;background:${bc}"></div></div>
-    ${opsOffersBlock(l)}
-    ${condsHtml}
+  return `<div class="ops-rec-tabs">${tabs}</div>${listingHdr}${innerTabs}
+    <div class="ops-stats-row">
+      <div class="ops-stat"><div class="ops-stat-l">Total</div><div class="ops-stat-v">${p.tot}</div></div>
+      <div class="ops-stat"><div class="ops-stat-l">Complétés</div><div class="ops-stat-v">${p.dn}</div></div>
+      <div class="ops-stat"><div class="ops-stat-l">Restants</div><div class="ops-stat-v">${p.tot-p.dn}</div></div>
+      <div class="ops-stat"><div class="ops-stat-l">Progrès</div><div class="ops-stat-v">${p.pct}%</div></div>
+    </div>
+    <div class="ops-pbar-wrap"><div class="ops-pbar-fill" style="width:${p.pct}%;background:${bc}"></div></div>
     ${phasesHtml}`;
 }
 
@@ -1403,7 +1456,8 @@ function opsCondsBlock(type, rec) {
   </div>`;
 }
 
-window.opsSetLTab = function(lid) { opsActiveLid=lid; renderOps(); };
+window.opsSetLTab = function(lid) { opsActiveLid=lid; opsSubscribeActivity(lid); renderOps(); };
+window.opsSetListingView = function(v) { opsListingView=v; renderOps(); };
 window.opsSetPTab = function(pid) { opsActivePid=pid; renderOps(); };
 window.opsTogglePhase = function(pid) {
   const body = document.getElementById("opsbody-"+pid);
@@ -1691,3 +1745,275 @@ function openModal(id){document.querySelectorAll(".modal").forEach(m=>m.classLis
 window.closeAllModals=function(e){if(e&&e.target!==document.getElementById("modalOverlay"))return;document.getElementById("modalOverlay").classList.remove("open");document.querySelectorAll(".modal").forEach(m=>m.classList.remove("active"));};
 function showToast(msg){let t=document.querySelector(".toast");if(!t){t=document.createElement("div");t.className="toast";document.body.appendChild(t);}t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2500);}
 document.addEventListener("click",e=>{if(e.target.classList.contains("close-x")){document.getElementById("modalOverlay").classList.remove("open");document.querySelectorAll(".modal").forEach(m=>m.classList.remove("active"));}});
+
+
+// ── Activity System ────────────────────────────────────────────────────────
+
+function opsActivityView(l) {
+  const acts = opsGetActivity(l.id);
+  const visits = acts.filter(a=>a.type==="visit");
+  const openHouses = acts.filter(a=>a.type==="openhouse");
+  const followUps = acts.filter(a=>a.followUpRequired&&!a.followUpDone);
+  const interested = acts.filter(a=>["yes","maybe"].includes(a.offerIntention));
+  const secondShowings = acts.filter(a=>a.secondShowing);
+
+  const sourceLabels = {direct:"Direct",agent:"Courtier",immocontact:"Immocontact",realtorca:"Realtor.ca",openhouse:"Visite libre",other:"Autre"};
+  const sourceCounts = {};
+  acts.forEach(a=>{ const s=a.source||"other"; sourceCounts[s]=(sourceCounts[s]||0)+1; });
+  const sourceBar = Object.entries(sourceCounts).sort((a,b)=>b[1]-a[1]).map(([s,n])=>{
+    const pct = Math.round((n/acts.length)*100);
+    const colors = {direct:"#1D9E75",agent:"#185FA5",immocontact:"#BA7517",realtorca:"#534AB7",openhouse:"#993C1D",other:"#888780"};
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+      <div style="font-size:12px;color:var(--text-2);width:100px;flex-shrink:0;">${sourceLabels[s]||s}</div>
+      <div style="flex:1;background:var(--bg);border-radius:99px;height:8px;overflow:hidden;">
+        <div style="width:${pct}%;height:8px;background:${colors[s]||"#888780"};border-radius:99px;"></div>
+      </div>
+      <div style="font-size:12px;font-weight:500;color:var(--text-2);width:30px;text-align:right;">${n}</div>
+    </div>`;
+  }).join("");
+
+  const intentionColors = {yes:"#1D9E75",maybe:"#BA7517",no:"#888780"};
+  const intentionLabels = {yes:"Oui",maybe:"Peut-être",no:"Non"};
+
+  const actRows = acts.map(a=>{
+    const ic = intentionColors[a.offerIntention]||"#888780";
+    const il = intentionLabels[a.offerIntention]||"—";
+    const isOH = a.type==="openhouse";
+    return `<div class="ops-act-row${a.followUpRequired&&!a.followUpDone?" ops-act-followup":""}">
+      <div class="ops-act-left">
+        <div class="ops-act-date">${a.date||"—"}</div>
+        <span class="ops-act-type-badge ops-act-type-${a.type||"visit"}">${isOH?"Visite libre":"Visite"}</span>
+        ${a.secondShowing?`<span style="font-size:10px;padding:1px 6px;border-radius:99px;background:#EEEDFE;color:#534AB7;font-weight:500;">2e visite</span>`:""}
+      </div>
+      <div class="ops-act-mid">
+        <div class="ops-act-name">${a.visitorName||a.agentName||"—"}</div>
+        ${a.agentName&&a.visitorName?`<div style="font-size:11px;color:var(--text-3);">${a.agentName}</div>`:""}
+        <div style="font-size:11px;color:var(--text-3);">${sourceLabels[a.source]||a.source||""}</div>
+      </div>
+      ${isOH?`<div class="ops-act-ratings">
+        <span style="font-size:12px;color:var(--text-2);">${a.totalVisitors||0} visiteurs · ${a.interestedCount||0} intéressés · ${a.cardsCollected||0} cartes</span>
+      </div>`:`<div class="ops-act-ratings">
+        ${a.ratings?.overall?`<span class="ops-act-star">⭐ ${a.ratings.overall}/5</span>`:""}
+        ${a.ratings?.interior?`<span class="ops-act-star">Int. ${a.ratings.interior}/5</span>`:""}
+        ${a.ratings?.price?`<span class="ops-act-star">Prix ${a.ratings.price}/5</span>`:""}
+      </div>`}
+      <div class="ops-act-right">
+        <span style="font-size:12px;font-weight:500;padding:2px 8px;border-radius:99px;background:${ic}20;color:${ic};border:1px solid ${ic}40;">${il}</span>
+        ${a.followUpRequired?`<span style="font-size:10px;padding:1px 6px;border-radius:99px;background:${a.followUpDone?"#E1F5EE":"#FAEEDA"};color:${a.followUpDone?"#085041":"#633806"};font-weight:500;">${a.followUpDone?"Suivi fait":"Suivi requis"}</span>`:""}
+      </div>
+      <div class="ops-act-actions">
+        ${a.followUpRequired&&!a.followUpDone?`<button class="ops-offer-btn ops-offer-btn-green" onclick="opsMarkFollowUpDone('${l.id}','${a.id}')">✓ Suivi fait</button>`:""}
+        ${a.notes?`<button class="ops-offer-btn" onclick="opsShowNote('${a.id}','${(a.notes||"").replace(/'/g,"\\'")}')">Notes</button>`:""}
+        <button class="ops-offer-btn" onclick="opsEditActivity('${l.id}','${a.id}')">Modifier</button>
+        <button class="ops-offer-btn ops-offer-btn-red" onclick="opsDeleteActivity('${l.id}','${a.id}')">×</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  const avgRating = (key) => {
+    const rated = acts.filter(a=>a.ratings?.[key]);
+    if (!rated.length) return "—";
+    return (rated.reduce((s,a)=>s+Number(a.ratings[key]),0)/rated.length).toFixed(1);
+  };
+
+  return `
+    <div class="ops-act-summary">
+      <div class="ops-act-kpi"><div class="ops-kpi-l">Visites totales</div><div class="ops-kpi-v">${visits.length}</div></div>
+      <div class="ops-act-kpi"><div class="ops-kpi-l">Visites libres</div><div class="ops-kpi-v">${openHouses.length}</div></div>
+      <div class="ops-act-kpi"><div class="ops-kpi-l">Intéressés</div><div class="ops-kpi-v" style="color:#1D9E75;">${interested.length}</div></div>
+      <div class="ops-act-kpi"><div class="ops-kpi-l">2es visites</div><div class="ops-kpi-v" style="color:#534AB7;">${secondShowings.length}</div></div>
+      <div class="ops-act-kpi"><div class="ops-kpi-l">Suivis requis</div><div class="ops-kpi-v" style="color:${followUps.length>0?"#BA7517":"var(--text)"};">${followUps.length}</div></div>
+      <div class="ops-act-kpi"><div class="ops-kpi-l">Note moyenne</div><div class="ops-kpi-v">${avgRating("overall")}/5</div></div>
+    </div>
+    ${acts.length>0?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:1.25rem;">
+      <div class="ops-card"><div class="ops-card-hd"><span class="ops-card-title">Sources de visite</span></div><div style="padding:1rem;">${sourceBar||"<div style='font-size:13px;color:var(--text-3);'>Aucune visite</div>"}</div></div>
+      <div class="ops-card"><div class="ops-card-hd"><span class="ops-card-title">Intention d'offre</span></div><div style="padding:1rem;">
+        ${["yes","maybe","no"].map(k=>{const n=acts.filter(a=>a.offerIntention===k).length; const pct=acts.length?Math.round(n/acts.length*100):0; return n>0?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><div style="font-size:12px;color:var(--text-2);width:80px;">${intentionLabels[k]}</div><div style="flex:1;background:var(--bg);border-radius:99px;height:8px;overflow:hidden;"><div style="width:${pct}%;height:8px;background:${intentionColors[k]};border-radius:99px;"></div></div><div style="font-size:12px;font-weight:500;width:30px;text-align:right;">${n}</div></div>`:"";}).join("")}
+        ${acts.every(a=>!a.offerIntention)?"<div style='font-size:13px;color:var(--text-3);'>Aucune donnée</div>":""}
+      </div></div>
+    </div>`:``}
+    ${followUps.length>0?`<div style="background:#FAEEDA;border:1px solid #FAC775;border-radius:var(--radius-lg);padding:.75rem 1rem;margin-bottom:1rem;display:flex;align-items:center;gap:10px;">
+      <div style="width:8px;height:8px;border-radius:50%;background:#BA7517;flex-shrink:0;"></div>
+      <div style="font-size:13px;font-weight:500;color:#633806;">Suivis requis : ${followUps.map(a=>a.visitorName||a.agentName||"Visiteur").join(", ")}</div>
+    </div>`:""}
+    <div class="ops-conds-card">
+      <div class="ops-conds-hd">
+        <span>Journal d'activité (${acts.length})</span>
+        <div style="display:flex;gap:6px;">
+          <button class="btn-secondary" style="font-size:12px;padding:4px 10px;" onclick="opsOpenActivityForm('${l.id}','visit')">+ Visite</button>
+          <button class="btn-secondary" style="font-size:12px;padding:4px 10px;" onclick="opsOpenActivityForm('${l.id}','openhouse')">+ Visite libre</button>
+        </div>
+      </div>
+      ${acts.length?actRows:`<div class="ops-empty">Aucune activité enregistrée — cliquez sur "+ Visite" pour commencer</div>`}
+    </div>`;
+}
+
+// ── Activity CRUD ──────────────────────────────────────────────────────────
+
+window.opsOpenActivityForm = function(lid, type, editId) {
+  const existing = editId ? opsGetActivity(lid).find(a=>a.id===editId) : null;
+  const g = f => existing?.[f]||"";
+  const gr = f => existing?.ratings?.[f]||"";
+  const isOH = (type||existing?.type) === "openhouse";
+  const today = new Date().toISOString().slice(0,10);
+
+  const starSelect = (name, id, val) => `
+    <div class="form-group"><label>${name}</label>
+    <div style="display:flex;gap:6px;">
+      ${[1,2,3,4,5].map(n=>`<button type="button" onclick="opsSetRating('${id}',${n})" id="star-${id}-${n}" style="width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:${Number(val||0)>=n?"#0C2B5E":"var(--surface)"};color:${Number(val||0)>=n?"#fff":"var(--text-2)"};font-size:14px;cursor:pointer;">${n}</button>`).join("")}
+      <input type="hidden" id="${id}" value="${val||""}">
+    </div></div>`;
+
+  document.getElementById("opsModalContent").innerHTML = `
+    <div class="modal-header">
+      <div><div class="modal-title">${editId?"Modifier":"Ajouter"} — ${isOH?"Visite libre":"Visite"}</div></div>
+      <button class="close-x" onclick="closeAllModals()">×</button>
+    </div>
+    <div class="mbody-ops" style="max-height:65vh;overflow-y:auto;padding-right:4px;">
+      <div class="ops-offer-section-title">Identification</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="form-group"><label>Date</label><input type="date" id="act-date" value="${g("date")||today}"></div>
+        <div class="form-group"><label>Heure</label><input type="time" id="act-time" value="${g("time")||""}"></div>
+      </div>
+      <div class="form-group"><label>Source</label>
+        <select id="act-source">
+          <option value="direct"${g("source")==="direct"?" selected":""}>Client direct</option>
+          <option value="agent"${g("source")==="agent"?" selected":""}>Courtier</option>
+          <option value="immocontact"${g("source")==="immocontact"?" selected":""}>Immocontact</option>
+          <option value="realtorca"${g("source")==="realtorca"?" selected":""}>Realtor.ca</option>
+          <option value="openhouse"${g("source")==="openhouse"?" selected":""}>Visite libre</option>
+          <option value="other"${g("source")==="other"?" selected":""}>Autre</option>
+        </select>
+      </div>
+      ${isOH?`
+        <div class="ops-offer-section-title" style="margin-top:1rem;">Résultats de la visite libre</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+          <div class="form-group"><label>Visiteurs totaux</label><input type="number" id="act-total" min="0" value="${g("totalVisitors")}"></div>
+          <div class="form-group"><label>Intéressés</label><input type="number" id="act-interested" min="0" value="${g("interestedCount")}"></div>
+          <div class="form-group"><label>Cartes collectées</label><input type="number" id="act-cards" min="0" value="${g("cardsCollected")}"></div>
+        </div>
+      `:`
+        <div class="form-group"><label>Nom du visiteur</label><input type="text" id="act-visitor" value="${g("visitorName")}" placeholder="ex: Jean Tremblay"></div>
+        <div class="form-group"><label>Courtier représentant</label><input type="text" id="act-agent" value="${g("agentName")}" placeholder="ex: Marie Dupont — Remax"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="form-group"><label>Téléphone</label><input type="text" id="act-phone" value="${g("phone")}"></div>
+          <div class="form-group"><label>Courriel</label><input type="text" id="act-email" value="${g("email")}"></div>
+        </div>
+        <div class="form-group"><label>Connecté?</label>
+          <select id="act-connected">
+            <option value="">—</option>
+            <option value="yes"${g("connected")==="yes"?" selected":""}>Oui</option>
+            <option value="maybe"${g("connected")==="maybe"?" selected":""}>Peut-être</option>
+            <option value="no"${g("connected")==="no"?" selected":""}>Non</option>
+          </select>
+        </div>
+
+        <div class="ops-offer-section-title" style="margin-top:1rem;">Évaluation</div>
+        ${starSelect("Note globale","rat-overall",gr("overall"))}
+        ${starSelect("Intérieur","rat-interior",gr("interior"))}
+        ${starSelect("Extérieur","rat-exterior",gr("exterior"))}
+        ${starSelect("Prix","rat-price",gr("price"))}
+
+        <div class="ops-offer-section-title" style="margin-top:1rem;">Suivi</div>
+        <div class="form-group"><label>Intention d'offre</label>
+          <select id="act-intention">
+            <option value="">—</option>
+            <option value="yes"${g("offerIntention")==="yes"?" selected":""}>Oui</option>
+            <option value="maybe"${g("offerIntention")==="maybe"?" selected":""}>Peut-être</option>
+            <option value="no"${g("offerIntention")==="no"?" selected":""}>Non</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;"><input type="checkbox" id="act-second" ${g("secondShowing")==="true"||existing?.secondShowing?"checked":""}> 2e visite</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;"><input type="checkbox" id="act-followup" ${g("followUpRequired")==="true"||existing?.followUpRequired?"checked":""}> Suivi requis</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;"><input type="checkbox" id="act-followupdone" ${existing?.followUpDone?"checked":""}> Suivi complété</label>
+        </div>
+      `}
+      <div class="form-group"><label>Notes / Feedback</label>
+        <textarea id="act-notes" rows="3" style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;">${g("notes")}</textarea>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeAllModals()">Annuler</button>
+      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="opsSaveActivity('${lid}','${type||existing?.type||"visit"}','${editId||""}')">Enregistrer</button>
+    </div>`;
+  openModal("opsModal");
+};
+
+window.opsSetRating = function(id, val) {
+  document.getElementById(id).value = val;
+  for (let i=1;i<=5;i++) {
+    const btn = document.getElementById(`star-${id}-${i}`);
+    if (btn) {
+      btn.style.background = i<=val?"#0C2B5E":"var(--surface)";
+      btn.style.color = i<=val?"#fff":"var(--text-2)";
+    }
+  }
+};
+
+window.opsSaveActivity = async function(lid, type, editId) {
+  const g = id => document.getElementById(id)?.value?.trim()||"";
+  const gb = id => document.getElementById(id)?.checked||false;
+  const isOH = type==="openhouse";
+
+  const data = {
+    type, date: g("act-date"), time: g("act-time"),
+    source: g("act-source"), notes: g("act-notes"),
+    updatedAt: serverTimestamp()
+  };
+
+  if (isOH) {
+    data.totalVisitors = parseInt(g("act-total"))||0;
+    data.interestedCount = parseInt(g("act-interested"))||0;
+    data.cardsCollected = parseInt(g("act-cards"))||0;
+  } else {
+    data.visitorName = g("act-visitor");
+    data.agentName = g("act-agent");
+    data.phone = g("act-phone");
+    data.email = g("act-email");
+    data.connected = g("act-connected");
+    data.offerIntention = g("act-intention");
+    data.secondShowing = gb("act-second");
+    data.followUpRequired = gb("act-followup");
+    data.followUpDone = gb("act-followupdone");
+    data.ratings = {
+      overall: g("rat-overall"), interior: g("rat-interior"),
+      exterior: g("rat-exterior"), price: g("rat-price")
+    };
+  }
+
+  const col = collection(db, "ops_listings", lid, "activity");
+  if (editId) {
+    await updateDoc(doc(db, "ops_listings", lid, "activity", editId), data);
+  } else {
+    data.createdAt = serverTimestamp();
+    data.createdBy = currentUser.uid;
+    await addDoc(col, data);
+  }
+  closeAllModals();
+  showToast("Activité enregistrée ✓");
+};
+
+window.opsEditActivity = function(lid, aid) {
+  const a = opsGetActivity(lid).find(x=>x.id===aid);
+  if (a) opsOpenActivityForm(lid, a.type, aid);
+};
+
+window.opsDeleteActivity = async function(lid, aid) {
+  if (!confirm("Supprimer cette entrée?")) return;
+  await deleteDoc(doc(db, "ops_listings", lid, "activity", aid));
+  showToast("Activité supprimée");
+};
+
+window.opsMarkFollowUpDone = async function(lid, aid) {
+  await updateDoc(doc(db, "ops_listings", lid, "activity", aid), {followUpDone:true, updatedAt:serverTimestamp()});
+  showToast("Suivi marqué comme complété ✓");
+};
+
+window.opsShowNote = function(aid, note) {
+  document.getElementById("opsModalContent").innerHTML = `
+    <div class="modal-header"><div class="modal-title">Notes</div><button class="close-x" onclick="closeAllModals()">×</button></div>
+    <div style="padding:1rem;font-size:13px;color:var(--text-2);line-height:1.7;white-space:pre-wrap;">${note}</div>
+    <div class="modal-actions"><button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="closeAllModals()">Fermer</button></div>`;
+  openModal("opsModal");
+};
