@@ -487,13 +487,17 @@ window.opsAcceptOffer = async function(lid, oid) {
   const acceptedAt = new Date().toISOString();
   const base = new Date(acceptedAt);
 
+  // Use local date string to avoid UTC offset shifting the base date
+  const localToday = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  const addDays = (n) => { const d=new Date(localToday); d.setDate(d.getDate()+n); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
+
   const offers = (l.offers||[]).map(o=>{
     if (o.id !== oid) return o;
     const deadlines = {};
-    if (o.conditions.inspection) { const d=new Date(base); d.setDate(d.getDate()+parseInt(o.conditions.inspection)); deadlines.inspection=d.toISOString().slice(0,10); }
-    if (o.conditions.financing)  { const d=new Date(base); d.setDate(d.getDate()+parseInt(o.conditions.financing));  deadlines.financing=d.toISOString().slice(0,10); }
-    if (o.conditions.docReview)  { const d=new Date(base); d.setDate(d.getDate()+parseInt(o.conditions.docReview));  deadlines.docReview=d.toISOString().slice(0,10); }
-    if (o.conditions.other)      { const d=new Date(base); d.setDate(d.getDate()+parseInt(o.conditions.other));      deadlines.other=d.toISOString().slice(0,10); }
+    if (o.conditions.inspection) deadlines.inspection = addDays(parseInt(o.conditions.inspection));
+    if (o.conditions.financing)  deadlines.financing  = addDays(parseInt(o.conditions.financing));
+    if (o.conditions.docReview)  deadlines.docReview  = addDays(parseInt(o.conditions.docReview));
+    if (o.conditions.other)      deadlines.other      = addDays(parseInt(o.conditions.other));
     return {...o, status:"accepted", acceptedAt, deadlines};
   });
 
@@ -601,11 +605,14 @@ window.opsUpdateOffer = async function(lid, oid) {
     };
     // Recalculate deadlines if already accepted
     if (o.status==="accepted"&&o.acceptedAt) {
-      const base=new Date(o.acceptedAt); const deadlines={};
-      if (updated.conditions.inspection){const d=new Date(base);d.setDate(d.getDate()+parseInt(updated.conditions.inspection));deadlines.inspection=d.toISOString().slice(0,10);}
-      if (updated.conditions.financing){const d=new Date(base);d.setDate(d.getDate()+parseInt(updated.conditions.financing));deadlines.financing=d.toISOString().slice(0,10);}
-      if (updated.conditions.docReview){const d=new Date(base);d.setDate(d.getDate()+parseInt(updated.conditions.docReview));deadlines.docReview=d.toISOString().slice(0,10);}
-      if (updated.conditions.other){const d=new Date(base);d.setDate(d.getDate()+parseInt(updated.conditions.other));deadlines.other=d.toISOString().slice(0,10);}
+      const base=new Date(o.acceptedAt);
+      const localBase=new Date(base.getFullYear(),base.getMonth(),base.getDate());
+      const addD=(n)=>{const d=new Date(localBase);d.setDate(d.getDate()+n);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
+      const deadlines={};
+      if (updated.conditions.inspection) deadlines.inspection=addD(parseInt(updated.conditions.inspection));
+      if (updated.conditions.financing)  deadlines.financing=addD(parseInt(updated.conditions.financing));
+      if (updated.conditions.docReview)  deadlines.docReview=addD(parseInt(updated.conditions.docReview));
+      if (updated.conditions.other)      deadlines.other=addD(parseInt(updated.conditions.other));
       updated.deadlines=deadlines;
     }
     return updated;
