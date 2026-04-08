@@ -1070,6 +1070,7 @@ function opsRenderListings() {
 
   // Default: checklist
   let phasesHtml = "";
+  let taskNum = 0;
   OPS_PHASES.forEach(ph=>{
     const dn = ph.tasks.filter(t=>(l.checklist||{})[t.id]).length;
     phasesHtml += `<div class="ops-phase">
@@ -1081,8 +1082,10 @@ function opsRenderListings() {
       </div>
       <div class="ops-phase-body">
         ${ph.tasks.map(t=>{
+          taskNum++;
           const done=(l.checklist||{})[t.id];
           return `<div class="ops-task${done?" done":""}">
+            <span style="font-size:11px;font-weight:700;color:${done?"var(--text-3)":ph.color};width:22px;flex-shrink:0;padding-top:1px;text-align:right;">${taskNum}</span>
             <input type="checkbox" ${done?"checked":""} onchange="opsToggleTask('${l.id}','${t.id}',this.checked)">
             <div class="ops-task-info">
               <div class="ops-task-name">${t.name}</div>
