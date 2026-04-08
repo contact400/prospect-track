@@ -822,7 +822,7 @@ function renderOps() {
 window.opsSetView = function(v) { opsView=v; renderOps(); };
 
 function opsRenderDash() {
-  const activeL = opsListings.filter(l=>["offre","ferme"].includes(l.status));
+  const activeL = opsListings.filter(l=>l.status==="ferme"||l.status==="vendu"||(l.status==="offre"&&(l.offers||[]).some(o=>o.status==="accepted")));
   let vol = 0;
   activeL.forEach(l=>vol+=opsParsePx(l.offerPrice||l.price));
   opsPurchases.forEach(p=>vol+=opsParsePx(p.price));
@@ -1442,7 +1442,7 @@ async function renderDashboard() {
   const totalMailings=allProspects.reduce((s,p)=>s+(p.mail||[]).filter(Boolean).length,0);const totalVisits=allProspects.reduce((s,p)=>s+(p.visits||[]).length,0);
   const evalsBooked=allProspects.filter(p=>(p.visits||[]).some(v=>v.evalBooked==="yes")).length;const contacted=allProspects.filter(p=>(p.visits||[]).some(v=>v.contact==="yes")).length;
   const dupCount=getDupProspects().length;
-  const activeOpsL=opsListings.filter(l=>["offre","ferme"].includes(l.status)).length;
+  const activeOpsL=opsListings.filter(l=>l.status==="ferme"||l.status==="vendu"||(l.status==="offre"&&(l.offers||[]).some(o=>o.status==="accepted"))).length;
   const activeOpsP=opsPurchases.length;
   let activityHtml='<p style="font-size:13px;color:var(--text-3);">No activity yet.</p>';
   try{const actSnap=await getDocs(query(collection(db,"activity"),orderBy("timestamp","desc")));const acts=actSnap.docs.slice(0,15).map(d=>d.data());if(acts.length)activityHtml=acts.map(a=>{const prospect=allProspects.find(p=>p.id===a.prospectId);const pName=prospect?(prospect.owners?.[0]?.name||"MLS #"+prospect.mls):"Unknown";const ts=a.timestamp?.toDate?a.timestamp.toDate().toLocaleDateString("en-CA"):"";return`<div class="activity-item"><div class="activity-dot"></div><div><div class="activity-text"><strong>${a.agentName||"Agent"}</strong> — ${a.action} on <em>${pName}</em></div><div class="activity-time">${ts}</div></div></div>`;}).join("");}catch(e){}
