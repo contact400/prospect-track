@@ -291,7 +291,7 @@ function subscribeToOps() {
   unsubscribeOpsListings = onSnapshot(lq, snap => {
     opsListings = snap.docs.map(d=>({id:d.id,...d.data()})).filter(opsCanAccess);
     if (document.getElementById("view-ops").classList.contains("active")) {
-      if (Date.now() - (window._lastChecklistSave||0) < 5000) return;
+      if (opsView==="listings" && opsListingView==="checklist") return;
       renderOps();
     }
   });
@@ -299,7 +299,7 @@ function subscribeToOps() {
   unsubscribeOpsPurchases = onSnapshot(pq, snap => {
     opsPurchases = snap.docs.map(d=>({id:d.id,...d.data()})).filter(opsCanAccess);
     if (document.getElementById("view-ops").classList.contains("active")) {
-      if (Date.now() - (window._lastChecklistSave||0) < 5000) return;
+      if (opsView==="listings" && opsListingView==="checklist") return;
       renderOps();
     }
   });
