@@ -1232,85 +1232,76 @@ function opsOffersBlock(l) {
 }
 
 window.opsGeneratePurchasePDF = function(pid) {
+  document.getElementById("opsModalContent").innerHTML = `
+    <div class="modal-header"><div class="modal-title">Langue du rapport</div><button class="close-x" onclick="closeAllModals()">×</button></div>
+    <div class="mbody-ops" style="display:flex;gap:12px;padding:1.5rem;">
+      <button class="ops-lang-btn" onclick="closeAllModals();opsGeneratePurchasePDFLang('${pid}','fr')">🇫🇷 Français</button>
+      <button class="ops-lang-btn" onclick="closeAllModals();opsGeneratePurchasePDFLang('${pid}','en')">🇬🇧 English</button>
+    </div>`;
+  openModal("opsModal");
+};
+
+window.opsGeneratePurchasePDFLang = function(pid, lang) {
   const p = opsPurchases.find(x=>x.id===pid);
   if (!p) return;
-  const fmtDate = ds => { if(!ds) return "—"; const [y,m,d]=ds.slice(0,10).split("-").map(Number); const dt=new Date(y,m-1,d); return dt.toLocaleDateString("fr-CA",{day:"numeric",month:"long",year:"numeric"}); };
-  const fmtDeadline = (ds, days) => { if(!ds&&!days) return "—"; if(ds) return fmtDate(ds)+(days?` (${days}j)`:""); return `${days} jours à compter de la signature`; };
+  const locale = lang==="en"?"en-CA":"fr-CA";
+  const fmtDate = ds => { if(!ds) return "—"; const pts=ds.slice(0,10).split("-").map(Number); const dt=new Date(pts[0],pts[1]-1,pts[2]); return dt.toLocaleDateString(locale,{day:"numeric",month:"long",year:"numeric"}); };
+  const fmtDateShort = ds => { if(!ds) return "—"; const pts=ds.slice(0,10).split("-").map(Number); const dt=new Date(pts[0],pts[1]-1,pts[2]); return dt.toLocaleDateString(locale,{day:"numeric",month:"short",year:"numeric"}); };
+  const T = lang==="en" ? {
+    docType:"Purchase Offer Summary",generatedOn:"Generated on",property:"Property",sellerAgent:"Seller's agent",listingPrice:"Offered price",agent:"BACHA agent",buyer:"Buyer",
+    validity:"Offer validity",notaryDate:"Notary date",occupancyDate:"Occupancy date",rent:"Rent if delay",yes:"Yes",no:"No",
+    statusLabel:"Status",accepted:"Accepted ✓",pending:"Pending",condTitle:"Conditions",days:"days from today",deadline:"Deadline",
+    datesTitle:"Key Dates",inclExcl:"Inclusions & Exclusions",inclusions:"Inclusions",exclusions:"Exclusions",
+    noConditions:"No conditions.",footer:"Generated via Track"
+  } : {
+    docType:"Résumé de promesse d'achat",generatedOn:"Généré le",property:"Propriété",sellerAgent:"Courtier vendeur",listingPrice:"Prix d'offre",agent:"Courtier BACHA",buyer:"Acheteur",
+    validity:"Validité de l'offre",notaryDate:"Date du notaire",occupancyDate:"Date d'occupation",rent:"Loyer si délai",yes:"Oui",no:"Non",
+    statusLabel:"Statut",accepted:"Offre acceptée ✓",pending:"Actif",condTitle:"Conditions",days:"jours à compter de la création",deadline:"Date limite",
+    datesTitle:"Dates importantes",inclExcl:"Inclusions & Exclusions",inclusions:"Inclusions",exclusions:"Exclusions",
+    noConditions:"Aucune condition.",footer:"Document généré via Track"
+  };
   const oc = p.offerConditions||{};
   const dl = p.deadlines||{};
-  const statusLabels={active:"Active",offre:"Offre acceptée",cond:"Conditions réalisées",notarie:"Notarié"};
-  const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
-  <title>Promesse d'achat — ${p.addr}</title>
-  <style>
-    body{font-family:Arial,sans-serif;font-size:13px;color:#1a1a1a;margin:40px;line-height:1.6;}
-    h1{font-size:20px;color:#0C2B5E;margin-bottom:4px;}
-    .sub{font-size:13px;color:#666;margin-bottom:24px;}
-    .section{margin-bottom:20px;}
-    .section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#0C2B5E;border-bottom:1px solid #ddd;padding-bottom:4px;margin-bottom:10px;}
-    .price{font-size:22px;font-weight:700;color:#0C2B5E;}
-    table{width:100%;border-collapse:collapse;}
-    td{padding:7px 10px;border-bottom:1px solid #f0f0f0;font-size:13px;}
-    td:first-child{color:#888;width:220px;}
-    td:last-child{font-weight:500;}
-    .footer{margin-top:40px;font-size:11px;color:#aaa;border-top:1px solid #eee;padding-top:12px;}
-  </style></head><body>
-  <h1>BACHA Groupe Immobilier</h1>
-  <div class="sub">Résumé de promesse d'achat — généré le ${fmtDate(new Date().toISOString().slice(0,10))}</div>
-
-  <div class="section">
-    <div class="section-title">Propriété</div>
-    <table>
-      <tr><td>Adresse</td><td style="font-size:16px;font-weight:700;">${p.addr}</td></tr>
-      ${p.sellerAgent?`<tr><td>Courtier vendeur</td><td>${p.sellerAgent}</td></tr>`:""}
-    </table>
+  const pStatusLabels = {active:lang==="en"?"Active":"Actif",offre:T.accepted,cond:lang==="en"?"Conditions fulfilled":"Conditions réalisées",notarie:lang==="en"?"Notarized":"Notarié"};
+  const condPairs = [["inspection",lang==="en"?"Pre-purchase inspection":"Inspection préachat",oc.inspection,dl.inspection],["financing",lang==="en"?"Financing":"Financement",oc.financing,dl.financing],["docReview",lang==="en"?"Document review":"Revue de documents",oc.docReview,dl.docReview],["other",oc.otherDetails||(lang==="en"?"Other condition":"Autre condition"),oc.other,dl.other]].filter(([,, days])=>days);
+  const condCards = condPairs.map(([k,label,days,deadline])=>{
+    const cond = (p.conditions||[]).find(c=>c.id===`ac_${k==="inspection"?"insp":k==="financing"?"fin":k==="docReview"?"doc":"oth"}`);
+    const fulfilled = cond?.done;
+    const color=fulfilled?"#1D9E75":"#BA7517"; const bg=fulfilled?"#E1F5EE":"#FAEEDA"; const icon=fulfilled?"✓":"!";
+    return `<div style="border:1px solid #e8e8e8;border-radius:8px;padding:14px 16px;display:flex;align-items:center;gap:12px;border-left:3px solid ${color};"><div style="width:32px;height:32px;border-radius:50%;background:${bg};color:${color};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0;">${icon}</div><div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#1a1a1a;">${label}</div><div style="font-size:11px;color:#888;margin-top:2px;">${days} ${T.days}</div>${oc.docList&&k==="docReview"?`<div style="font-size:11px;color:#666;margin-top:3px;">Documents : ${oc.docList}</div>`:""}</div><div style="text-align:right;"><div style="font-size:13px;font-weight:700;color:#378ADD;">${fmtDateShort(deadline)}</div><div style="font-size:10px;color:#999;">${T.deadline}</div></div></div>`;
+  }).join("");
+  const secTitle = txt => `<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#0C2B5E;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid #0C2B5E;display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:3px;background:#C41230;border-radius:2px;"></span>${txt}</div>`;
+  const html = `<!DOCTYPE html><html lang="${lang}"><head><meta charset="UTF-8"><title>${T.docType} — ${p.addr}</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:13px;color:#1a1a1a;background:white;}.page{max-width:820px;margin:0 auto;}@media print{body{margin:0;}.page{max-width:100%;}}</style></head><body><div class="page">
+  <div style="background:white;padding:24px 40px;display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #0C2B5E;"><img src="${BACHA_LOGO_SRC}" style="height:56px;" alt="BACHA"><div style="text-align:right;"><div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#378ADD;font-weight:600;margin-bottom:4px;">${T.docType}</div><div style="font-size:12px;color:#888;">${T.generatedOn} ${fmtDate(new Date().toISOString().slice(0,10))}</div><div style="font-size:15px;font-weight:700;color:#0C2B5E;margin-top:4px;">${p.addr}</div></div></div>
+  <div style="height:4px;background:linear-gradient(to right,#C41230 0%,#C41230 33%,#fff 33%,#fff 66%,#0C2B5E 66%);"></div>
+  <div style="padding:24px 40px;border-bottom:1px solid #e8e8e8;display:flex;justify-content:space-between;align-items:flex-start;background:#F5F7FB;">
+    <div><div style="font-size:20px;font-weight:700;color:#0C2B5E;margin-bottom:6px;">${p.addr}</div>${p.sellerAgent?`<div style="font-size:12px;color:#666;margin-top:3px;">${T.sellerAgent} : ${p.sellerAgent}</div>`:""}<div style="font-size:12px;color:#666;margin-top:3px;">${T.agent} : ${p.agent||"—"}</div></div>
+    <div style="text-align:right;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#999;margin-bottom:3px;">${T.buyer}</div><div style="font-size:18px;font-weight:700;color:#0C2B5E;">${p.buyer||"—"}</div></div>
   </div>
-
-  <div class="section">
-    <div class="section-title">Offre</div>
-    <table>
-      <tr><td>Acheteur</td><td>${p.buyer||"—"}</td></tr>
-      <tr><td>Courtier BACHA</td><td>${p.agent||"—"}</td></tr>
-      <tr><td>Prix offert</td><td class="price">${p.price||"—"}</td></tr>
-      <tr><td>Validité de l'offre</td><td>${p.validity||"—"}</td></tr>
-      <tr><td>Statut</td><td>${statusLabels[p.status]||"—"}</td></tr>
-    </table>
+  <div style="margin:24px 40px;border-radius:12px;overflow:hidden;border:1px solid #e0e5f0;">
+    <div style="background:#0C2B5E;padding:20px 24px;display:flex;justify-content:space-between;align-items:center;"><div style="color:white;"><div style="font-size:12px;color:#7EA8D8;margin-bottom:4px;text-transform:uppercase;letter-spacing:.08em;">${T.listingPrice}</div><div style="font-size:30px;font-weight:700;">${p.price||"—"}</div></div><div style="text-align:right;color:white;"><div style="font-size:12px;color:#7EA8D8;margin-bottom:4px;">${T.statusLabel}</div><div style="font-size:15px;font-weight:700;">${pStatusLabels[p.status||"active"]||"—"}</div></div></div>
+    <div style="background:#1D9E75;padding:8px 24px;display:flex;align-items:center;gap:8px;"><div style="width:8px;height:8px;border-radius:50%;background:white;opacity:.8;"></div><div style="font-size:12px;font-weight:600;color:white;">${p.buyer||"—"} · ${p.agent||"—"}</div></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);">
+      <div style="padding:16px 20px;border-right:1px solid #f0f0f0;border-bottom:1px solid #f0f0f0;"><div style="font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#999;margin-bottom:5px;">${T.validity}</div><div style="font-size:13px;font-weight:600;">${p.validity||"—"}</div></div>
+      <div style="padding:16px 20px;border-right:1px solid #f0f0f0;border-bottom:1px solid #f0f0f0;"><div style="font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#999;margin-bottom:5px;">${T.notaryDate}</div><div style="font-size:13px;font-weight:600;">${fmtDate(p.notaryDate)}</div></div>
+      <div style="padding:16px 20px;border-bottom:1px solid #f0f0f0;"><div style="font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#999;margin-bottom:5px;">${T.occupancyDate}</div><div style="font-size:13px;font-weight:600;">${fmtDate(p.occupancyDate)}</div></div>
+      <div style="padding:16px 20px;border-right:1px solid #f0f0f0;"><div style="font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#999;margin-bottom:5px;">${T.rent}</div><div style="font-size:13px;font-weight:600;">${p.rent==="oui"?T.yes+(p.rentDetails?" — "+p.rentDetails:""):T.no}</div></div>
+      <div style="padding:16px 20px;border-right:1px solid #f0f0f0;"><div style="font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#999;margin-bottom:5px;">${lang==="en"?"Seller agent":"Courtier vendeur"}</div><div style="font-size:13px;font-weight:600;">${p.sellerAgent||"—"}</div></div>
+      <div style="padding:16px 20px;"><div style="font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#999;margin-bottom:5px;">BACHA</div><div style="font-size:13px;font-weight:600;">${p.agent||"—"}</div></div>
+    </div>
   </div>
-
-  <div class="section">
-    <div class="section-title">Conditions</div>
-    <table>
-      ${oc.inspection?`<tr><td>Inspection</td><td>${fmtDeadline(dl.inspection,oc.inspection)}</td></tr>`:""}
-      ${oc.financing?`<tr><td>Financement</td><td>${fmtDeadline(dl.financing,oc.financing)}</td></tr>`:""}
-      ${oc.docReview?`<tr><td>Revue de documents</td><td>${fmtDeadline(dl.docReview,oc.docReview)}${oc.docList?`<br><span style="font-size:12px;color:#666;">Documents : ${oc.docList}</span>`:""}</td></tr>`:""}
-      ${oc.other?`<tr><td>Autre condition</td><td>${fmtDeadline(dl.other,oc.other)}${oc.otherDetails?`<br><span style="font-size:12px;color:#666;">${oc.otherDetails}</span>`:""}</td></tr>`:""}
-      ${!oc.inspection&&!oc.financing&&!oc.docReview&&!oc.other?`<tr><td colspan="2" style="color:#888;">Aucune condition</td></tr>`:""}
-    </table>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Dates & occupation</div>
-    <table>
-      <tr><td>Date du notaire souhaitée</td><td>${fmtDate(p.notaryDate)}</td></tr>
-      <tr><td>Date d'occupation souhaitée</td><td>${fmtDate(p.occupancyDate)}</td></tr>
-      <tr><td>Loyer si délai notaire/occupation</td><td>${p.rent==="oui"?"Oui"+(p.rentDetails?" — "+p.rentDetails:""):"Non"}</td></tr>
-    </table>
-  </div>
-
-  ${p.inclusions||p.exclusions?`<div class="section">
-    <div class="section-title">Inclusions & exclusions</div>
-    <table>
-      ${p.inclusions?`<tr><td>Inclusions</td><td>${p.inclusions}</td></tr>`:""}
-      ${p.exclusions?`<tr><td>Exclusions</td><td>${p.exclusions}</td></tr>`:""}
-    </table>
-  </div>`:""}
-
-  <div class="footer">BACHA Groupe Immobilier · Document généré par Track · ${new Date().toLocaleDateString("fr-CA")}</div>
-  </body></html>`;
+  ${p.validity?`<div style="margin:0 40px 20px;background:#FFF8E6;border:1px solid #FAC775;border-radius:8px;padding:12px 18px;display:flex;align-items:center;gap:10px;"><div style="font-size:16px;">⏱</div><div style="font-size:12px;color:#633806;">${lang==="en"?"Offer valid until":"Offre valide jusqu'au"} <strong style="color:#1a1a1a;">${p.validity}</strong></div></div>`:""}
+  ${condPairs.length?`<div style="padding:20px 40px;border-bottom:1px solid #e8e8e8;">${secTitle(T.condTitle)}<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">${condCards}</div></div>`:`<div style="padding:20px 40px;border-bottom:1px solid #e8e8e8;color:#888;font-size:13px;">${T.noConditions}</div>`}
+  ${p.notaryDate||p.occupancyDate?`<div style="padding:20px 40px;border-bottom:1px solid #e8e8e8;">${secTitle(T.datesTitle)}<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">${p.notaryDate?`<div style="background:#F5F7FB;border-radius:8px;padding:14px 16px;text-align:center;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#888;margin-bottom:6px;">${T.notaryDate}</div><div style="font-size:15px;font-weight:700;color:#0C2B5E;">${fmtDate(p.notaryDate)}</div></div>`:""} ${p.occupancyDate?`<div style="background:#F5F7FB;border-radius:8px;padding:14px 16px;text-align:center;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#888;margin-bottom:6px;">${T.occupancyDate}</div><div style="font-size:15px;font-weight:700;color:#0C2B5E;">${fmtDate(p.occupancyDate)}</div></div>`:""}</div></div>`:""}
+  ${p.inclusions||p.exclusions?`<div style="padding:20px 40px;border-bottom:1px solid #e8e8e8;">${secTitle(T.inclExcl)}<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">${p.inclusions?`<div style="background:#F5F7FB;border-radius:8px;padding:14px 16px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#888;margin-bottom:8px;">${T.inclusions}</div><div style="font-size:13px;color:#1a1a1a;line-height:1.6;">${p.inclusions}</div></div>`:""} ${p.exclusions?`<div style="background:#F5F7FB;border-radius:8px;padding:14px 16px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#888;margin-bottom:8px;">${T.exclusions}</div><div style="font-size:13px;color:#1a1a1a;line-height:1.6;">${p.exclusions}</div></div>`:""}</div></div>`:""}
+  <div style="background:#0C2B5E;padding:18px 40px;display:flex;justify-content:space-between;align-items:center;"><div style="color:rgba(255,255,255,0.6);font-size:11px;"><strong style="color:white;font-size:12px;display:block;margin-bottom:2px;">BACHA Groupe Immobilier Inc.</strong>${T.footer} · contact@karimbacha.com</div><div style="width:1px;height:32px;background:rgba(255,255,255,0.2);"></div><div style="text-align:right;color:rgba(255,255,255,0.6);font-size:11px;"><strong style="color:white;display:block;margin-bottom:2px;">Karim Bacha</strong>Courtier immobilier agréé</div></div>
+  </div></body></html>`;
   const win = window.open("","_blank");
   win.document.write(html);
   win.document.close();
-  setTimeout(()=>win.print(),500);
+  setTimeout(()=>win.print(),600);
 };
+
 
 function opsRenderVentes() {
   const ventesL = opsListings.filter(l=>["ferme","vendu"].includes(l.status));
