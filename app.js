@@ -1021,22 +1021,22 @@ function opsFollowUpQueue() {
 
 function opsRenderListings() {
   const activeListings = opsListings.filter(l=>!["ferme","vendu"].includes(l.status));
-  if (!activeListings.length) return `<div class="empty-state"><div class="empty-icon">◩</div><div class="empty-title">Aucune inscription active</div><div class="empty-sub">Les ventes conclues se trouvent dans l'onglet Ventes.</div></div>`;
+  if (!activeListings.length) return `<div class="ops-rec-tabs">${opsListings.map(li=>{const pr=opsLProg(li);const short=li.addr.length>22?li.addr.substring(0,20)+"…":li.addr;return`<div class="ops-rec-tab" onclick="opsSetLTab('${li.id}')">${short} <span class="ops-tab-pct">${pr.pct}%</span></div>`;}).join("")}</div><div class="empty-state"><div class="empty-icon">◩</div><div class="empty-title">Aucune inscription active</div><div class="empty-sub">Les ventes conclues se trouvent dans l'onglet Ventes.</div></div>`;
+
   if (!opsActiveLid || !activeListings.find(x=>x.id===opsActiveLid)) opsActiveLid = activeListings[0].id;
   const l = activeListings.find(x=>x.id===opsActiveLid);
   const p = opsLProg(l);
   const bc = p.pct===100?"#1D9E75":p.pct>50?"#378ADD":"#BA7517";
 
-  const tabs = opsListings.map(li=>{
-    const pr=opsLProg(li); const short=li.addr.length>22?li.addr.substring(0,20)+"…":li.addr;
+  const tabs = activeListings.map(li=>{
+    const pr=opsLProg(li);
+    const short=li.addr.length>22?li.addr.substring(0,20)+"…":li.addr;
     const urg=opsHasUrg(li.conditions);
     return `<div class="ops-rec-tab${opsActiveLid===li.id?" active":""}" onclick="opsSetLTab('${li.id}')">${short} <span class="ops-tab-pct">${pr.pct}%</span>${urg?'<span class="ops-urgdot"></span>':""}</div>`;
   }).join("");
 
-  // Subscribe to activity for this listing
   opsSubscribeActivity(l.id);
 
-  // Inner view tabs
   const innerTabs = `<div class="ops-inner-tabs">
     <button class="ops-inner-tab${opsListingView==="checklist"?" active":""}" onclick="opsSetListingView('checklist')">SOP Checklist</button>
     <button class="ops-inner-tab${opsListingView==="conditions"?" active":""}" onclick="opsSetListingView('conditions')">Conditions</button>
@@ -1068,7 +1068,6 @@ function opsRenderListings() {
       </div>
     </div>`;
 
-  // Route to correct inner view
   if (opsListingView === "conditions") {
     return `<div class="ops-rec-tabs">${tabs}</div>${listingHdr}${innerTabs}${opsCondsBlock("l", l)}`;
   }
@@ -1080,12 +1079,32 @@ function opsRenderListings() {
   }
 
   // Default: checklist
-  const condsHtml = opsCondsBlock("l", l);
-
   let phasesHtml = "";
   OPS_PHASES.forEach(ph=>{
     const dn = ph.tasks.filter(t=>(l.checklist||{})[t.id]).length;
     phasesHtml += `<div class="ops-phase">
+      <div class="ops-phase-hd" onclick="this.parentElement.classList.toggle('open')">
+        <span class="ops-phase-dot" style="background:${ph.color}"></span>
+        <span class="ops-phase-lbl">${ph.label}</span>
+        <span class="ops-phase-cnt">${dn}/${ph.tasks.length}</span>
+        <span class="ops-phase-chev">▼</span>
+      </div>
+      <div class="ops-phase-body">
+        ${ph.tasks.map(t=>{
+          const done=(l.checklist||{})[t.id];
+          return `<div class="ops-task${done?" done":""}">
+            <input type="checkbox" ${done?"checked":""} onchange="opsToggleTask('${l.id}','${t.id}',this.checked)">
+            <div class="ops-task-info">
+              <div class="ops-task-name">${t.name}</div>
+              <div class="ops-task-meta">${[t.who,t.tool,t.time].filter(Boolean).join(" · ")}</div>
+              ${t.det?`<div class="ops-task-det">${t.det}</div>`:""}
+            </div>
+          </div>`;
+        }).join("")}
+      </div>
+    </div>`;
+  });
+
   return `<div class="ops-rec-tabs">${tabs}</div>${listingHdr}${innerTabs}
     <div class="ops-stats-row">
       <div class="ops-stat"><div class="ops-stat-l">Total</div><div class="ops-stat-v">${p.tot}</div></div>
