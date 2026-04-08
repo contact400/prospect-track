@@ -1249,3 +1249,28 @@ body {
   .ops-vente-fields { grid-template-columns:repeat(2,1fr); }
   .ops-ventes-summary { grid-template-columns:1fr 1fr; }
 }
+
+/* ── Offer cards ──────────────────────────────────────────── */
+.ops-offer-section-title { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:var(--accent); margin-bottom:.75rem; margin-top:.25rem; }
+.ops-offer-card { border:1px solid var(--border); border-radius:var(--radius-lg); padding:1rem; margin-bottom:.75rem; background:var(--surface); }
+.ops-offer-card:last-child { margin-bottom:0; }
+.ops-offer-accepted { border-color:#1D9E75; background:#F0FDF8; }
+.ops-offer-top { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:.75rem; }
+.ops-offer-name { font-size:14px; font-weight:600; color:var(--text); }
+.ops-offer-sub { font-size:12px; color:var(--text-2); margin-top:2px; }
+.ops-offer-price { font-size:17px; font-weight:700; color:var(--accent); margin-bottom:4px; }
+.ops-offer-conds { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:.75rem; }
+.ops-offer-cond-tag { font-size:11px; padding:2px 8px; border-radius:99px; background:var(--bg); border:1px solid var(--border); color:var(--text-2); font-weight:500; }
+.ops-deadlines { background:var(--bg); border-radius:var(--radius); padding:.65rem .875rem; margin-bottom:.75rem; }
+.ops-deadline-row { display:flex; justify-content:space-between; font-size:12px; padding:3px 0; border-bottom:1px solid var(--border); }
+.ops-deadline-row:last-child { border-bottom:none; }
+.ops-deadline-row span:first-child { color:var(--text-2); }
+.ops-deadline-row span:last-child { font-weight:600; color:var(--text); }
+.ops-offer-actions { display:flex; gap:6px; flex-wrap:wrap; padding-top:.75rem; border-top:1px solid var(--border); }
+.ops-offer-btn { font-size:12px; padding:4px 10px; border-radius:var(--radius); border:1px solid var(--border-med); background:var(--surface); color:var(--text-2); cursor:pointer; font-family:var(--font); white-space:nowrap; }
+.ops-offer-btn:hover { background:var(--bg); }
+.ops-offer-btn-green { background:#E1F5EE; color:#085041; border-color:#9FE1CB; font-weight:500; }
+.ops-offer-btn-amber { background:#FAEEDA; color:#633806; border-color:#FAC775; font-weight:500; }
+.ops-offer-btn-gray { background:#F1EFE8; color:#5F5E5A; border-color:#D3D1C7; }
+.ops-offer-btn-red { color:#A32D2D; border-color:#F09595; }
+.ops-offer-btn-red:hover { background:#FCEBEB; }
