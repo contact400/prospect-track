@@ -1044,35 +1044,6 @@ function opsRenderListings() {
     <button class="ops-inner-tab${opsListingView==="activity"?" active":""}" onclick="opsSetListingView('activity')">Activité <span class="ops-tab-count">${opsGetActivity(l.id).length}</span></button>
   </div>`;
 
-  // Route to correct inner view
-  if (opsListingView === "conditions") {
-    return `<div class="ops-rec-tabs">${tabs}</div>${listingHdr}${innerTabs}${opsCondsBlock("l", l)}`;
-  }
-  if (opsListingView === "offers") {
-    return `<div class="ops-rec-tabs">${tabs}</div>${listingHdr}${innerTabs}${opsOffersBlock(l)}`;
-  }
-  if (opsListingView === "activity") {
-    return `<div class="ops-rec-tabs">${tabs}</div>${listingHdr}${innerTabs}${opsActivityView(l)}`;
-  }
-
-  // Default: checklist
-  const condsHtml = opsCondsBlock("l", l);
-
-  let phasesHtml = "";
-  OPS_PHASES.forEach(ph=>{
-    const dn = ph.tasks.filter(t=>(l.checklist||{})[t.id]).length;
-    phasesHtml += `<div class="ops-phase">
-      <div class="ops-phdr" onclick="opsTogglePhase('${ph.id}')">
-        <div class="ops-pdot" style="background:${ph.color}"></div>
-        <div class="ops-ptitle">${ph.label}</div>
-        <div class="ops-pmeta">${dn}/${ph.tasks.length}</div>
-        <div class="ops-pchev" id="opschev-${ph.id}">▼</div>
-      </div>
-      <div class="ops-pbody" id="opsbody-${ph.id}" style="display:none;">
-        ${ph.tasks.map(t=>{const on=(l.checklist||{})[t.id];return`<div class="ops-task"><div class="ops-tchk${on?" on":""}" onclick="opsToggleTask('${l.id}','${t.id}')"></div><div class="ops-tcon"><div class="ops-tname${on?" on":""}">${t.name}</div><div class="ops-tmeta"><span class="ops-tag ops-tw">${t.who}</span><span class="ops-tag ops-tt">${t.tool}</span><span class="ops-tag ops-ti">${t.time}</span></div><div class="ops-tdet">${t.det}</div></div></div>`;}).join("")}
-      </div></div>`;
-  });
-
   const listingHdr = `<div class="ops-listing-hdr">
       <div>
         <div class="ops-addr-big">${l.addr} <span class="ops-status-badge" style="background:${OPS_STATUS_COLORS[l.status]}20;color:${OPS_STATUS_COLORS[l.status]};border:1px solid ${OPS_STATUS_COLORS[l.status]}40">${OPS_STATUS_LABELS[l.status]}</span></div>
@@ -1097,6 +1068,24 @@ function opsRenderListings() {
       </div>
     </div>`;
 
+  // Route to correct inner view
+  if (opsListingView === "conditions") {
+    return `<div class="ops-rec-tabs">${tabs}</div>${listingHdr}${innerTabs}${opsCondsBlock("l", l)}`;
+  }
+  if (opsListingView === "offers") {
+    return `<div class="ops-rec-tabs">${tabs}</div>${listingHdr}${innerTabs}${opsOffersBlock(l)}`;
+  }
+  if (opsListingView === "activity") {
+    return `<div class="ops-rec-tabs">${tabs}</div>${listingHdr}${innerTabs}${opsActivityView(l)}`;
+  }
+
+  // Default: checklist
+  const condsHtml = opsCondsBlock("l", l);
+
+  let phasesHtml = "";
+  OPS_PHASES.forEach(ph=>{
+    const dn = ph.tasks.filter(t=>(l.checklist||{})[t.id]).length;
+    phasesHtml += `<div class="ops-phase">
   return `<div class="ops-rec-tabs">${tabs}</div>${listingHdr}${innerTabs}
     <div class="ops-stats-row">
       <div class="ops-stat"><div class="ops-stat-l">Total</div><div class="ops-stat-v">${p.tot}</div></div>
