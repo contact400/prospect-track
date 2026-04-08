@@ -30,6 +30,10 @@ let opsView = "dash"; // "dash" | "listings" | "purchases"
 let opsActiveLid = null;
 let opsActivePid = null;
 let opsListingView = "checklist"; // "checklist" | "conditions" | "offers" | "activity"
+
+window.opsSetListingView = function(v) { opsListingView=v; renderOps(); };
+window.opsSetLTab = function(lid) { opsActiveLid=lid; opsSubscribeActivity(lid); renderOps(); };
+window.opsSetPTab = function(pid) { opsActivePid=pid; renderOps(); };
 let opsActivityCache = {}; // lid -> array of activity docs
 let unsubscribeActivity = {};
 
@@ -944,8 +948,8 @@ function renderOps() {
     <button class="btn-primary" onclick="opsOpenNewListing()">+ Nouvelle inscription</button>`;
 
   if (opsView==="dash") { el.innerHTML = tabs + opsRenderDash(); return; }
-  if (opsView==="listings") { el.innerHTML = opsRenderListings(); return; }
-  if (opsView==="purchases") { el.innerHTML = opsRenderPurchases(); return; }
+  if (opsView==="listings") { el.innerHTML = tabs + opsRenderListings(); return; }
+  if (opsView==="purchases") { el.innerHTML = tabs + opsRenderPurchases(); return; }
   if (opsView==="ventes") { el.innerHTML = tabs + opsRenderVentes(); return; }
 }
 
@@ -1464,9 +1468,7 @@ function opsCondsBlock(type, rec) {
   </div>`;
 }
 
-window.opsSetLTab = function(lid) { opsActiveLid=lid; opsSubscribeActivity(lid); renderOps(); };
-window.opsSetListingView = function(v) { opsListingView=v; renderOps(); };
-window.opsSetPTab = function(pid) { opsActivePid=pid; renderOps(); };
+
 window.opsTogglePhase = function(pid) {
   const body = document.getElementById("opsbody-"+pid);
   const chev = document.getElementById("opschev-"+pid);
