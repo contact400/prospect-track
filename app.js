@@ -415,7 +415,12 @@ window.opsOpenNewOffer = function(lid) {
       <div class="form-group"><label>Nom de l'acheteur</label><input type="text" id="of-buyer" placeholder="ex: Jean Tremblay"></div>
       <div class="form-group"><label>Courtier représentant</label><input type="text" id="of-agent" placeholder="ex: Marie Dupont — Remax"></div>
       <div class="form-group"><label>Prix offert ($)</label><input type="text" id="of-price" placeholder="ex: 1 050 000 $" style="font-size:15px;font-weight:500;"></div>
-      <div class="form-group"><label>Validité de l'offre</label><input type="text" id="of-validity" placeholder="ex: 24 heures, jusqu'au 8 avril 17h"></div>
+      <div class="form-group"><label>Validité de l'offre</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="date" id="of-validity-date" style="flex:1;">
+          <input type="time" id="of-validity-time" value="17:00" style="width:110px;">
+        </div>
+      </div>
 
       <div class="ops-offer-section-title" style="margin-top:1.25rem;">Conditions</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
@@ -457,10 +462,14 @@ window.opsOpenNewOffer = function(lid) {
 window.opsSaveOffer = async function(lid) {
   const g = id => document.getElementById(id)?.value?.trim();
   if (!g("of-buyer") && !g("of-agent")) { showToast("Veuillez entrer le nom de l'acheteur ou du courtier"); return; }
+  const vDate = g("of-validity-date"); const vTime = document.getElementById("of-validity-time")?.value||"";
+  const validityDisplay = vDate ? (() => { const [y,m,d]=vDate.split("-").map(Number); const dt=new Date(y,m-1,d); return dt.toLocaleDateString("fr-CA",{day:"numeric",month:"long",year:"numeric"})+(vTime?" à "+vTime:""); })() : "";
+  const rawPrice = g("of-price").replace(/[^0-9]/g,"");
+  const fmtPrice = rawPrice ? Number(rawPrice).toLocaleString("fr-CA")+" $" : g("of-price");
   const offer = {
     id: "o" + Date.now(),
     buyer: g("of-buyer"), agent: g("of-agent"),
-    price: g("of-price"), validity: g("of-validity"),
+    price: fmtPrice, validityDate: vDate, validityTime: vTime, validity: validityDisplay,
     conditions: {
       inspection: g("of-insp")||"", financing: g("of-fin")||"",
       docReview: g("of-docs")||"", other: g("of-other")||"",
@@ -550,7 +559,12 @@ window.opsEditOffer = function(lid, oid) {
       <div class="form-group"><label>Nom de l'acheteur</label><input type="text" id="of-buyer" value="${o.buyer||""}" placeholder="ex: Jean Tremblay"></div>
       <div class="form-group"><label>Courtier représentant</label><input type="text" id="of-agent" value="${o.agent||""}" placeholder="ex: Marie Dupont — Remax"></div>
       <div class="form-group"><label>Prix offert ($)</label><input type="text" id="of-price" value="${o.price||""}" style="font-size:15px;font-weight:500;"></div>
-      <div class="form-group"><label>Validité de l'offre</label><input type="text" id="of-validity" value="${o.validity||""}"></div>
+      <div class="form-group"><label>Validité de l'offre</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="date" id="of-validity-date" value="${o.validityDate||""}" style="flex:1;">
+          <input type="time" id="of-validity-time" value="${o.validityTime||"17:00"}" style="width:110px;">
+        </div>
+      </div>
       <div class="ops-offer-section-title" style="margin-top:1.25rem;">Conditions</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
         <div class="form-group"><label>Inspection (jours)</label><input type="number" id="of-insp" value="${o.conditions?.inspection||""}" min="0"></div>
@@ -589,11 +603,15 @@ window.opsEditOffer = function(lid, oid) {
 window.opsUpdateOffer = async function(lid, oid) {
   const g = id => document.getElementById(id)?.value?.trim();
   const l = opsListings.find(x=>x.id===lid);
+  const vDate2 = g("of-validity-date"); const vTime2 = document.getElementById("of-validity-time")?.value||"";
+  const validityDisplay2 = vDate2 ? (() => { const [y,m,d]=vDate2.split("-").map(Number); const dt=new Date(y,m-1,d); return dt.toLocaleDateString("fr-CA",{day:"numeric",month:"long",year:"numeric"})+(vTime2?" à "+vTime2:""); })() : "";
+  const rawPrice2 = g("of-price").replace(/[^0-9]/g,"");
+  const fmtPrice2 = rawPrice2 ? Number(rawPrice2).toLocaleString("fr-CA")+" $" : g("of-price");
   const offers = (l.offers||[]).map(o=>{
     if (o.id!==oid) return o;
     const updated = {...o,
       buyer:g("of-buyer"), agent:g("of-agent"),
-      price:g("of-price"), validity:g("of-validity"),
+      price:fmtPrice2, validityDate:vDate2, validityTime:vTime2, validity:validityDisplay2,
       conditions:{
         inspection:g("of-insp")||"", financing:g("of-fin")||"",
         docReview:g("of-docs")||"", other:g("of-other")||"",
