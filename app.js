@@ -1481,13 +1481,11 @@ function opsCondsBlock(type, rec) {
 }
 
 
-window.opsTogglePhase = function(pid) {
-  const body = document.getElementById("opsbody-"+pid);
-  const chev = document.getElementById("opschev-"+pid);
-  if (!body) return;
-  const open = body.style.display!=="none";
-  body.style.display = open?"none":"block";
-  if (chev) chev.style.transform = open?"":"rotate(180deg)";
+window.opsTogglePhase = function(phId, el) {
+  if (!el) return;
+  el.classList.toggle('open');
+  if (el.classList.contains('open')) opsOpenPhases.add(phId);
+  else opsOpenPhases.delete(phId);
 };
 
 
