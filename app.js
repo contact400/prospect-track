@@ -29,7 +29,8 @@ let opsPurchases = [];
 let opsView = "dash"; // "dash" | "listings" | "purchases"
 let opsActiveLid = null;
 let opsActivePid = null;
-let opsListingView = "checklist"; // "checklist" | "conditions" | "offers" | "activity"
+let opsListingView = "checklist";
+let opsOpenPhases = new Set(); // "checklist" | "conditions" | "offers" | "activity"
 
 window.opsSetListingView = function(v) { opsListingView=v; renderOps(); };
 window.opsSetLTab = function(lid) { opsActiveLid=lid; opsSubscribeActivity(lid); renderOps(); };
@@ -1082,8 +1083,8 @@ function opsRenderListings() {
   let taskNum = 0;
   OPS_PHASES.forEach(ph=>{
     const dn = ph.tasks.filter(t=>(l.checklist||{})[t.id]).length;
-    phasesHtml += `<div class="ops-phase">
-      <div class="ops-phase-hd" onclick="this.parentElement.classList.toggle('open')">
+    phasesHtml += `<div class="ops-phase${opsOpenPhases.has('${ph.id}')?" open":""}">
+      <div class="ops-phase-hd" onclick="opsTogglePhase('${ph.id}',this.parentElement)">
         <span class="ops-phase-dot" style="background:${ph.color}"></span>
         <span class="ops-phase-lbl">${ph.label}</span>
         <span class="ops-phase-cnt">${dn}/${ph.tasks.length}</span>
