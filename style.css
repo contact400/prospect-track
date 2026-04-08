@@ -1274,3 +1274,5 @@ body {
 .ops-offer-btn-gray { background:#F1EFE8; color:#5F5E5A; border-color:#D3D1C7; }
 .ops-offer-btn-red { color:#A32D2D; border-color:#F09595; }
 .ops-offer-btn-red:hover { background:#FCEBEB; }
+
+.ops-vente-actions { display:flex; gap:6px; flex-wrap:wrap; padding-top:.75rem; border-top:1px solid var(--border); margin-top:.75rem; }
