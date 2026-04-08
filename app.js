@@ -166,7 +166,7 @@ function opsCanAccess(doc) {
   return (doc.assignedTo || []).includes(currentUser.uid);
 }
 function opsParsePx(s) { if (!s) return 0; const n = s.replace(/[^0-9]/g,""); return n ? parseInt(n) : 0; }
-function opsFmtPx(n) { if (!n) return "—"; if (n>=1000000) return (n/1000000).toFixed(2).replace(/\.?0+$/,"")+"M $"; return Math.round(n/1000)+"K $"; }
+function opsFmtPx(n) { if (!n) return "—"; return Number(n).toLocaleString("fr-CA")+" $"; }
 function opsDaysUntil(ds) { if (!ds) return null; const t=new Date(); t.setHours(0,0,0,0); const d=new Date(ds); d.setHours(0,0,0,0); return Math.round((d-t)/86400000); }
 function opsCondInfo(c) {
   if (c.done) return {cls:"ops-cb-done",txt:"Levée",urg:false};
