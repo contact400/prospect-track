@@ -944,8 +944,8 @@ function renderOps() {
     <button class="btn-primary" onclick="opsOpenNewListing()">+ Nouvelle inscription</button>`;
 
   if (opsView==="dash") { el.innerHTML = tabs + opsRenderDash(); return; }
-  if (opsView==="listings") { el.innerHTML = tabs + opsRenderListings(); return; }
-  if (opsView==="purchases") { el.innerHTML = tabs + opsRenderPurchases(); return; }
+  if (opsView==="listings") { el.innerHTML = opsRenderListings(); return; }
+  if (opsView==="purchases") { el.innerHTML = opsRenderPurchases(); return; }
   if (opsView==="ventes") { el.innerHTML = tabs + opsRenderVentes(); return; }
 }
 
