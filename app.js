@@ -291,7 +291,7 @@ function subscribeToOps() {
   unsubscribeOpsListings = onSnapshot(lq, snap => {
     opsListings = snap.docs.map(d=>({id:d.id,...d.data()})).filter(opsCanAccess);
     if (document.getElementById("view-ops").classList.contains("active")) {
-      if (window._checklistPending) return;
+      if (Date.now() - (window._lastChecklistSave||0) < 3000) return;
       renderOps();
     }
   });
