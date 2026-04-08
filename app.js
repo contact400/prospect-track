@@ -290,7 +290,10 @@ function subscribeToOps() {
   const lq = query(collection(db,"ops_listings"), orderBy("createdAt","desc"));
   unsubscribeOpsListings = onSnapshot(lq, snap => {
     opsListings = snap.docs.map(d=>({id:d.id,...d.data()})).filter(opsCanAccess);
-    if (document.getElementById("view-ops").classList.contains("active")) renderOps();
+    if (document.getElementById("view-ops").classList.contains("active")) {
+      if (window._checklistPending) return;
+      renderOps();
+    }
   });
   const pq = query(collection(db,"ops_purchases"), orderBy("createdAt","desc"));
   unsubscribeOpsPurchases = onSnapshot(pq, snap => {
