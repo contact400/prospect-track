@@ -288,18 +288,31 @@ window.closeMobileNav = function() { document.getElementById("mobileDrawer").sty
 // ── Ops Firestore subscriptions ────────────────────────────
 function subscribeToOps() {
   const lq = query(collection(db,"ops_listings"), orderBy("createdAt","desc"));
+  let _prevListingIds = [];
   unsubscribeOpsListings = onSnapshot(lq, snap => {
-    opsListings = snap.docs.map(d=>({id:d.id,...d.data()})).filter(opsCanAccess);
+    const newListings = snap.docs.map(d=>({id:d.id,...d.data()})).filter(opsCanAccess);
+    const newIds = newListings.map(l=>l.id).join(",");
+    const prevIds = _prevListingIds.join(",");
+    const onlyDataChanged = newIds === prevIds;
+    _prevListingIds = newListings.map(l=>l.id);
+    opsListings = newListings;
     if (document.getElementById("view-ops").classList.contains("active")) {
-      if (opsView==="listings" && opsListingView==="checklist") return;
+      // Skip re-render if we're on checklist and only data changed (e.g. checklist toggle)
+      if (opsView==="listings" && opsListingView==="checklist" && onlyDataChanged) return;
       renderOps();
     }
   });
   const pq = query(collection(db,"ops_purchases"), orderBy("createdAt","desc"));
+  let _prevPurchaseIds = [];
   unsubscribeOpsPurchases = onSnapshot(pq, snap => {
-    opsPurchases = snap.docs.map(d=>({id:d.id,...d.data()})).filter(opsCanAccess);
+    const newPurchases = snap.docs.map(d=>({id:d.id,...d.data()})).filter(opsCanAccess);
+    const newPIds = newPurchases.map(p=>p.id).join(",");
+    const prevPIds = _prevPurchaseIds.join(",");
+    const onlyPDataChanged = newPIds === prevPIds;
+    _prevPurchaseIds = newPurchases.map(p=>p.id);
+    opsPurchases = newPurchases;
     if (document.getElementById("view-ops").classList.contains("active")) {
-      if (opsView==="listings" && opsListingView==="checklist") return;
+      if (opsView==="listings" && opsListingView==="checklist" && onlyPDataChanged) return;
       renderOps();
     }
   });
