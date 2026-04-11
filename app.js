@@ -609,6 +609,7 @@ window.closeMobileNav = function() { document.getElementById("mobileDrawer").sty
 // ── Database ───────────────────────────────────────────────
 let allPeople = [];
 let unsubscribePeople = null;
+let selectedPeople = new Set();
 let dbActiveTab = "overview";
 let dbSearchQuery = "";
 let dbFilterTier = "all";
