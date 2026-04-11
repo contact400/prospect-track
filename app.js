@@ -365,7 +365,7 @@ const p = id ? allPeople.find(x=>x.id===id) : null;
       <textarea id="pm-notes" rows="3" style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;">${g("notes")}</textarea>
     </div>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="openPersonModal('${p.id}')">Annuler</button>
+     <button class="btn-secondary" onclick="closeAllModals()">Annuler</button>
       <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="dbSavePerson('${p?.id||""}')">Enregistrer</button>
     </div>`;
 document.getElementById("opsModalContent").innerHTML = html;
