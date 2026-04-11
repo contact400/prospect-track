@@ -414,16 +414,29 @@ function renderDatabase() {
   document.getElementById("databaseCount").textContent = `${allPeople.length} contact${allPeople.length !== 1 ? "s" : ""}${overdue.length ? ` · ${overdue.length} suivi${overdue.length !== 1 ? "s" : ""} en retard` : ""}`;
   const filterBar = `<div class="db-filter-bar"><input class="db-search" type="text" placeholder="Rechercher un contact..." value="${dbSearchQuery}" oninput="dbSetSearch(this.value)"><select class="ops-status-sel" onchange="dbFilterTier=this.value;renderDatabase()"><option value="all">Tous les tiers</option><option value="vip"${dbFilterTier==="vip"?" selected":""}>⭐⭐⭐ VIP</option><option value="a"${dbFilterTier==="a"?" selected":""}>⭐⭐ A-Client</option><option value="b"${dbFilterTier==="b"?" selected":""}>⭐ B-Client</option><option value="c"${dbFilterTier==="c"?" selected":""}>C-Client</option></select><select class="ops-status-sel" onchange="dbFilterStage=this.value;renderDatabase()"><option value="all">Toutes les étapes</option>${DB_STAGES.map(s=>`<option value="${s}"${dbFilterStage===s?" selected":""}>${s}</option>`).join("")}</select><select class="ops-status-sel" onchange="dbFilterSource=this.value;renderDatabase()"><option value="all">Toutes les sources</option>${DB_SOURCES.map(s=>`<option value="${s}"${dbFilterSource===s?" selected":""}>${s}</option>`).join("")}</select></div>`;
   if (!list.length) { el.innerHTML = filterBar + `<div class="empty-state"><div class="empty-icon">👥</div><div class="empty-title">Aucun contact trouvé</div><div class="empty-sub">Ajoutez votre premier contact ou ajustez les filtres.</div></div>`; return; }
-  const cards = list.map(p => {
+  const header = `<div style="display:grid;grid-template-columns:2fr 1.2fr 1.2fr 1fr 1fr 1fr 1fr;gap:0;padding:8px 16px;border-bottom:1px solid var(--border);background:var(--bg);"><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Nom</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Téléphone</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Courriel</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Tier</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Étape</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Dernière activité</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Agent</span></div>`;
+  const rows = list.map(p => {
     const initials = `${(p.firstName||"?")[0]}${(p.lastName||"")[0]||""}`.toUpperCase();
-    const days = dbDaysSinceContact(p);
-    const od = dbIsOverdue(p);
-    const lastContact = p.lastContactDate ? `<span style="font-size:11px;color:var(--text-3);">Dernier contact: ${p.lastContactDate}</span>` : `<span style="font-size:11px;color:var(--text-3);">Jamais contacté</span>`;
-    const nextFollowUp = p.nextFollowUp ? `<span style="font-size:11px;color:${new Date(p.nextFollowUp)<new Date()?"#C41230":"var(--text-3)"};">Suivi: ${p.nextFollowUp}</span>` : "";
     const avatarBg = p.tier==="vip"?"#E9A000":p.tier==="a"?"#185FA5":p.tier==="b"?"#1D9E75":"#888780";
-    return `<div class="db-card" onclick="openPersonModal('${p.id}')"><div class="db-card-top"><div class="db-avatar" style="background:${avatarBg}">${initials}</div><div style="flex:1;min-width:0;"><div class="db-name">${p.firstName||""} ${p.lastName||""}</div><div class="db-meta">${p.phone||""}${p.email?" · "+p.email:""}</div><div class="db-meta">${p.source||""}${p.neighborhood?" · "+p.neighborhood:""}</div></div>${od?`<span style="font-size:18px;">🔴</span>`:""}</div><div class="db-badges">${dbTierBadge(p.tier)}${dbStageBadge(p.stage)}${p.language?`<span class="badge badge-gray">${p.language}</span>`:""}</div><div class="db-card-footer"><div style="display:flex;flex-direction:column;gap:2px;">${lastContact}${nextFollowUp}</div>${od?`<span class="db-followup-overdue">⚠ ${days}j sans contact</span>`:""}</div></div>`;
+    const od = dbIsOverdue(p);
+    const days = dbDaysSinceContact(p);
+    const lastActivity = p.lastContactDate ? `${days === 0 ? "Aujourd'hui" : days + "j"} · ${p.lastContactDate}` : "Jamais";
+    const lastActivityColor = od ? "#C41230" : "var(--text-3)";
+    return `<div onclick="openPersonModal('${p.id}')" style="display:grid;grid-template-columns:2fr 1.2fr 1.2fr 1fr 1fr 1fr 1fr;gap:0;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.1s;background:var(--surface);" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background='var(--surface)'">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:32px;height:32px;border-radius:50%;background:${avatarBg};color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;">${initials}</div>
+        <div><div style="font-size:13px;font-weight:500;color:var(--text);">${p.firstName||""} ${p.lastName||""}</div><div style="font-size:11px;color:var(--text-3);">${p.source||""}${p.neighborhood?" · "+p.neighborhood:""}</div></div>
+        ${od?`<span style="width:6px;height:6px;border-radius:50%;background:#C41230;flex-shrink:0;" title="Suivi en retard"></span>`:""}
+      </div>
+      <div style="font-size:13px;color:var(--text-2);align-self:center;">${p.phone||"—"}</div>
+      <div style="font-size:13px;color:var(--text-2);align-self:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.email||"—"}</div>
+      <div style="align-self:center;">${dbTierBadge(p.tier)||`<span style="color:var(--text-3);font-size:12px;">—</span>`}</div>
+      <div style="align-self:center;">${dbStageBadge(p.stage)||`<span style="color:var(--text-3);font-size:12px;">—</span>`}</div>
+      <div style="font-size:12px;color:${lastActivityColor};align-self:center;">${lastActivity}</div>
+      <div style="font-size:12px;color:var(--text-2);align-self:center;">${p.assignedAgent||"—"}</div>
+    </div>`;
   }).join("");
-  el.innerHTML = filterBar + `<div class="db-grid">${cards}</div>`;
+  el.innerHTML = filterBar + `<div style="border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;">${header}${rows}</div>`;
 }
 
 window.dbSetSearch = function(val) { dbSearchQuery = val; renderDatabase(); };
