@@ -243,7 +243,8 @@ window.openPersonModal = function(id) {
   const od = p ? dbIsOverdue(p) : false;
   const leftPanel = `
     <div style="width:260px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;padding:20px 16px;">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        ${p ? `<button onclick="dbOpenEdit('${p.id}')" style="padding:5px 12px;border-radius:var(--radius);background:var(--accent);color:#fff;border:none;font-size:12px;font-family:var(--font);cursor:pointer;">✏ Modifier</button>` : "<div></div>"}
         <button class="close-x" onclick="closeAllModals()" style="position:static;">×</button>
       </div>
       <div style="text-align:center;margin-bottom:16px;">
