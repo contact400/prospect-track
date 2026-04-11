@@ -1331,3 +1331,19 @@ body {
 .time-btn span { font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; }
 .time-btn.active { background:var(--accent); color:#fff; border-color:var(--accent); }
 .time-btn:hover:not(.active) { background:var(--accent-light); border-color:var(--accent); color:var(--accent); }
+/* ── Mobile responsive ───────────────────────────────── */
+@media (max-width: 600px) {
+  .ops-kpi-grid { grid-template-columns: 1fr 1fr !important; }
+  .ops-two-col { grid-template-columns: 1fr !important; }
+  .ops-ventes-summary { grid-template-columns: 1fr 1fr !important; }
+  .ops-kpi-v { font-size: 20px !important; }
+  .ops-stats-row { grid-template-columns: 1fr 1fr !important; }
+  .detail-grid { grid-template-columns: 1fr 1fr !important; }
+  .stats-grid { grid-template-columns: 1fr 1fr !important; }
+  .mail-grid { grid-template-columns: 1fr 1fr !important; }
+  .modal-overlay { padding: 0 !important; }
+  .modal { border-radius: 0 !important; max-height: 100vh !important; width: 100% !important; }
+  .ops-lactions { flex-wrap: wrap !important; }
+  .ops-tabs { overflow-x: auto !important; }
+  .ops-inner-tabs { overflow-x: auto !important; }
+}
