@@ -233,6 +233,140 @@ window.handleLogin = async function() {
   try { await signInWithEmailAndPassword(auth,email,password); }
   catch(e) { err.textContent="Invalid email or password."; err.style.display="block"; btn.textContent="Sign in"; btn.disabled=false; }
 };
+window.openAddPerson = function() { openPersonModal(null); };
+
+window.openPersonModal = function(id) {
+  const p = id ? allPeople.find(x=>x.id===id) : null;
+  const g = f => p?.[f]||"";
+  document.getElementById("opsModalContent").innerHTML = `
+    <div class="modal-header">
+      <div><div class="modal-title">${p?"Modifier le contact":"Nouveau contact"}</div></div>
+      <button class="close-x" onclick="closeAllModals()">×</button>
+    </div>
+    <div class="mbody-ops" style="max-height:70vh;overflow-y:auto;padding-right:4px;">
+      <div class="ops-offer-section-title">Identité</div>
+      <div class="pm-grid">
+        <div class="pm-field"><label>Prénom</label><input type="text" id="pm-fn" value="${g("firstName")}" placeholder="Jean"></div>
+        <div class="pm-field"><label>Nom</label><input type="text" id="pm-ln" value="${g("lastName")}" placeholder="Tremblay"></div>
+        <div class="pm-field"><label>Téléphone</label><input type="text" id="pm-phone" value="${g("phone")}"></div>
+        <div class="pm-field"><label>Courriel</label><input type="text" id="pm-email" value="${g("email")}"></div>
+        <div class="pm-field"><label>Date de naissance</label><input type="date" id="pm-bday" value="${g("birthday")}"></div>
+        <div class="pm-field"><label>Anniversaire de mariage</label><input type="date" id="pm-wday" value="${g("weddingAnniversary")}"></div>
+        <div class="pm-field"><label>Langue</label><select id="pm-lang"><option value="">—</option>${DB_LANGS.map(l=>`<option value="${l}"${g("language")===l?" selected":""}>${l}</option>`).join("")}</select></div>
+        <div class="pm-field"><label>Religion</label><select id="pm-rel"><option value="">—</option>${DB_RELIGIONS.map(r=>`<option value="${r}"${g("religion")===r?" selected":""}>${r}</option>`).join("")}</select></div>
+      </div>
+      <div class="ops-offer-section-title" style="margin-top:1rem;">Profil CRM</div>
+      <div class="pm-grid">
+        <div class="pm-field"><label>Tier</label><select id="pm-tier"><option value="">—</option><option value="vip"${g("tier")==="vip"?" selected":""}>⭐⭐⭐ VIP</option><option value="a"${g("tier")==="a"?" selected":""}>⭐⭐ A-Client</option><option value="b"${g("tier")==="b"?" selected":""}>⭐ B-Client</option><option value="c"${g("tier")==="c"?" selected":""}>C-Client</option></select></div>
+        <div class="pm-field"><label>Étape</label><select id="pm-stage"><option value="">—</option>${DB_STAGES.map(s=>`<option value="${s}"${g("stage")===s?" selected":""}>${s}</option>`).join("")}</select></div>
+        <div class="pm-field"><label>Source</label><select id="pm-src"><option value="">—</option>${DB_SOURCES.map(s=>`<option value="${s}"${g("source")===s?" selected":""}>${s}</option>`).join("")}</select></div>
+        <div class="pm-field"><label>Agent assigné</label><select id="pm-agent"><option value="Karim"${g("assignedAgent")==="Karim"?" selected":""}>Karim</option><option value="Benjamin"${g("assignedAgent")==="Benjamin"?" selected":""}>Benjamin</option><option value="Afshin"${g("assignedAgent")==="Afshin"?" selected":""}>Afshin</option></select></div>
+        <div class="pm-field"><label>Dernier contact</label><input type="date" id="pm-last" value="${g("lastContactDate")}"></div>
+        <div class="pm-field"><label>Prochain suivi</label><input type="date" id="pm-next" value="${g("nextFollowUp")}"></div>
+      </div>
+      <div class="ops-offer-section-title" style="margin-top:1rem;">Profil immobilier</div>
+      <div class="pm-grid">
+        <div class="pm-field"><label>Quartier / Secteur</label><input type="text" id="pm-hood" value="${g("neighborhood")}" placeholder="Laval, Vimont..."></div>
+        <div class="pm-field"><label>Type de propriété actuelle</label><select id="pm-proptype"><option value="">—</option><option value="Condo"${g("propertyType")==="Condo"?" selected":""}>Condo</option><option value="Maison"${g("propertyType")==="Maison"?" selected":""}>Maison</option><option value="Duplex"${g("propertyType")==="Duplex"?" selected":""}>Duplex</option><option value="Locataire"${g("propertyType")==="Locataire"?" selected":""}>Locataire</option></select></div>
+        <div class="pm-field"><label>Propriétaire ou locataire</label><select id="pm-own"><option value="">—</option><option value="Propriétaire"${g("ownerStatus")==="Propriétaire"?" selected":""}>Propriétaire</option><option value="Locataire"${g("ownerStatus")==="Locataire"?" selected":""}>Locataire</option></select></div>
+        <div class="pm-field"><label>Renouvellement hypothèque</label><input type="text" id="pm-mort" value="${g("mortgageRenewal")}" placeholder="ex: 2026"></div>
+        <div class="pm-field"><label>Intérêt</label><select id="pm-intent"><option value="">—</option><option value="Acheter"${g("intent")==="Acheter"?" selected":""}>Acheter</option><option value="Vendre"${g("intent")==="Vendre"?" selected":""}>Vendre</option><option value="Investir"${g("intent")==="Investir"?" selected":""}>Investir</option><option value="Louer"${g("intent")==="Louer"?" selected":""}>Louer</option></select></div>
+        <div class="pm-field"><label>Valeur estimée propriété</label><input type="text" id="pm-val" value="${g("propertyValue")}" placeholder="ex: 550 000 $"></div>
+      </div>
+      <div class="ops-offer-section-title" style="margin-top:1rem;">Relation & référence</div>
+      <div class="pm-grid">
+        <div class="pm-field"><label>Référé par</label><input type="text" id="pm-ref" value="${g("referredBy")}" placeholder="Nom du référent"></div>
+        <div class="pm-field"><label>Engagement</label><select id="pm-eng"><option value="">—</option><option value="hot"${g("engagement")==="hot"?" selected":""}>🔥 Hot</option><option value="warm"${g("engagement")==="warm"?" selected":""}>🌡 Warm</option><option value="cold"${g("engagement")==="cold"?" selected":""}>🧊 Cold</option></select></div>
+        <div class="pm-field"><label>Enfants (ages)</label><input type="text" id="pm-kids" value="${g("kidsAges")}" placeholder="ex: 3, 7, 12"></div>
+        <div class="pm-field"><label>Anniversaire emménagement</label><input type="date" id="pm-movein" value="${g("moveInAnniversary")}"></div>
+      </div>
+      <div class="ops-offer-section-title" style="margin-top:1rem;">Notes</div>
+      <textarea id="pm-notes" rows="3" style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;">${g("notes")}</textarea>
+      ${p ? `
+      <div class="ops-offer-section-title" style="margin-top:1rem;">Journal d'activité</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <input type="text" id="pm-log-text" placeholder="Ajouter une note ou interaction..." style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:var(--font);">
+        <button onclick="dbAddLog('${p.id}')" style="padding:7px 14px;border-radius:6px;background:var(--accent);color:#fff;border:none;font-size:13px;font-family:var(--font);cursor:pointer;white-space:nowrap;">+ Ajouter</button>
+      </div>
+      <div id="pm-timeline">${dbRenderTimeline(p)}</div>` : ""}
+    </div>
+    <div class="modal-actions">
+      ${p&&isAdmin?`<button class="btn-danger" onclick="dbDeletePerson('${p.id}')">Supprimer</button>`:""}
+      <button class="btn-secondary" onclick="closeAllModals()">Annuler</button>
+      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="dbSavePerson('${p?.id||""}')">Enregistrer</button>
+    </div>`;
+  openModal("opsModal");
+};
+
+function dbRenderTimeline(p) {
+  const logs = (p.timeline||[]).slice().reverse();
+  if (!logs.length) return `<div style="font-size:13px;color:var(--text-3);padding:8px 0;">Aucune activité enregistrée.</div>`;
+  return logs.map(l=>{
+    const dotCls = l.type==="transaction"?"tl-dot tl-dot-transaction":l.type==="note"?"tl-dot tl-dot-note":"tl-dot";
+    return `<div class="tl-entry"><div class="${dotCls}"></div><div class="tl-content"><div class="tl-text">${l.text}</div><div class="tl-time">${l.date||""} · ${l.by||""}</div></div></div>`;
+  }).join("");
+}
+
+window.dbAddLog = async function(id) {
+  const text = document.getElementById("pm-log-text")?.value?.trim();
+  if (!text) return;
+  const p = allPeople.find(x=>x.id===id); if (!p) return;
+  const entry = { id:"l"+Date.now(), text, type:"note", date:new Date().toISOString().slice(0,10), by:currentUserProfile?.name||currentUser.email };
+  const timeline = [...(p.timeline||[]), entry];
+  await updateDoc(doc(db,"people",id),{timeline, lastContactDate:entry.date, updatedAt:serverTimestamp()});
+  document.getElementById("pm-log-text").value="";
+  showToast("Note ajoutée ✓");
+};
+
+window.dbSavePerson = async function(editId) {
+  const g = id => document.getElementById(id)?.value?.trim()||"";
+  const firstName = g("pm-fn"); if (!firstName) { showToast("Prénom requis"); return; }
+  const data = {
+    firstName, lastName:g("pm-ln"), phone:g("pm-phone"), email:g("pm-email"),
+    birthday:g("pm-bday"), weddingAnniversary:g("pm-wday"), language:g("pm-lang"), religion:g("pm-rel"),
+    tier:g("pm-tier"), stage:g("pm-stage"), source:g("pm-src"), assignedAgent:g("pm-agent"),
+    lastContactDate:g("pm-last"), nextFollowUp:g("pm-next"),
+    neighborhood:g("pm-hood"), propertyType:g("pm-proptype"), ownerStatus:g("pm-own"),
+    mortgageRenewal:g("pm-mort"), intent:g("pm-intent"), propertyValue:g("pm-val"),
+    referredBy:g("pm-ref"), engagement:g("pm-eng"), kidsAges:g("pm-kids"), moveInAnniversary:g("pm-movein"),
+    notes:g("pm-notes"), updatedAt:serverTimestamp()
+  };
+  if (editId) {
+    await updateDoc(doc(db,"people",editId),data);
+  } else {
+    data.createdAt=serverTimestamp(); data.createdBy=currentUser.uid; data.timeline=[];
+    await addDoc(collection(db,"people"),data);
+  }
+  closeAllModals();
+  showToast(editId?"Contact mis à jour ✓":"Contact ajouté ✓");
+};
+
+window.dbDeletePerson = async function(id) {
+  if (!confirm("Supprimer ce contact?")) return;
+  await deleteDoc(doc(db,"people",id));
+  closeAllModals();
+  showToast("Contact supprimé");
+};
+
+window.promoteProspectToDatabase = async function(prospectId) {
+  const p = allProspects.find(x=>x.id===prospectId); if (!p) return;
+  const o = p.owners?.[0]||{};
+  const nameParts = (o.name||"").split(" ");
+  const data = {
+    firstName:nameParts[0]||"", lastName:nameParts.slice(1).join(" ")||"",
+    phone:"", email:"", source:"Door knock",
+    neighborhood:extractMunicipality(p.listingAddress),
+    stage:"Contacted", tier:"c",
+    lastContactDate:new Date().toISOString().slice(0,10),
+    notes:`Promu depuis Prospects — MLS #${p.mls}`,
+    linkedProspectId:prospectId,
+    timeline:[{id:"l"+Date.now(),text:`Promu depuis Prospects (MLS #${p.mls})`,type:"note",date:new Date().toISOString().slice(0,10),by:currentUserProfile?.name||currentUser.email}],
+    createdAt:serverTimestamp(), createdBy:currentUser.uid, updatedAt:serverTimestamp()
+  };
+  const ref = await addDoc(collection(db,"people"),data);
+  showToast("Contact ajouté à la Database ✓");
+  switchView("database",null);
+};
 window.handleLogout = async function() {
   if (unsubscribeProspects) unsubscribeProspects();
   if (unsubscribeTargets) unsubscribeTargets();
@@ -249,7 +383,7 @@ function showLogin() {
 function showApp() {
   document.getElementById("loginScreen").classList.remove("active");
   document.getElementById("appScreen").classList.add("active");
-  setupRoleUI(); subscribeToProspects(); subscribeToTargets(); subscribeToOps();
+  setupRoleUI(); subscribeToProspects(); subscribeToTargets(); subscribeToOps(); subscribeToPeople();
   if (isAdmin) { loadAllUsers(); renderDashboard(); }
 }
 function setupRoleUI() {
@@ -268,24 +402,95 @@ function setupRoleUI() {
   document.getElementById("opsNav").style.display="";
   document.getElementById("opsNavMobile").style.display="";
 }
+function renderDatabase() {
+  const el = document.getElementById("databaseContent"); if (!el) return;
+  document.getElementById("addPersonBtn").style.display = "";
+  let list = [...allPeople];
+  if (dbSearchQuery) list = list.filter(p => `${p.firstName} ${p.lastName} ${p.email} ${p.phone}`.toLowerCase().includes(dbSearchQuery.toLowerCase()));
+  if (dbFilterTier !== "all") list = list.filter(p => p.tier === dbFilterTier);
+  if (dbFilterStage !== "all") list = list.filter(p => p.stage === dbFilterStage);
+  if (dbFilterSource !== "all") list = list.filter(p => p.source === dbFilterSource);
+  const overdue = allPeople.filter(p => dbIsOverdue(p));
+  document.getElementById("databaseCount").textContent = `${allPeople.length} contact${allPeople.length !== 1 ? "s" : ""}${overdue.length ? ` · ${overdue.length} suivi${overdue.length !== 1 ? "s" : ""} en retard` : ""}`;
+  const filterBar = `<div class="db-filter-bar"><input class="db-search" type="text" placeholder="Rechercher un contact..." value="${dbSearchQuery}" oninput="dbSetSearch(this.value)"><select class="ops-status-sel" onchange="dbFilterTier=this.value;renderDatabase()"><option value="all">Tous les tiers</option><option value="vip"${dbFilterTier==="vip"?" selected":""}>⭐⭐⭐ VIP</option><option value="a"${dbFilterTier==="a"?" selected":""}>⭐⭐ A-Client</option><option value="b"${dbFilterTier==="b"?" selected":""}>⭐ B-Client</option><option value="c"${dbFilterTier==="c"?" selected":""}>C-Client</option></select><select class="ops-status-sel" onchange="dbFilterStage=this.value;renderDatabase()"><option value="all">Toutes les étapes</option>${DB_STAGES.map(s=>`<option value="${s}"${dbFilterStage===s?" selected":""}>${s}</option>`).join("")}</select><select class="ops-status-sel" onchange="dbFilterSource=this.value;renderDatabase()"><option value="all">Toutes les sources</option>${DB_SOURCES.map(s=>`<option value="${s}"${dbFilterSource===s?" selected":""}>${s}</option>`).join("")}</select></div>`;
+  if (!list.length) { el.innerHTML = filterBar + `<div class="empty-state"><div class="empty-icon">👥</div><div class="empty-title">Aucun contact trouvé</div><div class="empty-sub">Ajoutez votre premier contact ou ajustez les filtres.</div></div>`; return; }
+  const cards = list.map(p => {
+    const initials = `${(p.firstName||"?")[0]}${(p.lastName||"")[0]||""}`.toUpperCase();
+    const days = dbDaysSinceContact(p);
+    const od = dbIsOverdue(p);
+    const lastContact = p.lastContactDate ? `<span style="font-size:11px;color:var(--text-3);">Dernier contact: ${p.lastContactDate}</span>` : `<span style="font-size:11px;color:var(--text-3);">Jamais contacté</span>`;
+    const nextFollowUp = p.nextFollowUp ? `<span style="font-size:11px;color:${new Date(p.nextFollowUp)<new Date()?"#C41230":"var(--text-3)"};">Suivi: ${p.nextFollowUp}</span>` : "";
+    const avatarBg = p.tier==="vip"?"#E9A000":p.tier==="a"?"#185FA5":p.tier==="b"?"#1D9E75":"#888780";
+    return `<div class="db-card" onclick="openPersonModal('${p.id}')"><div class="db-card-top"><div class="db-avatar" style="background:${avatarBg}">${initials}</div><div style="flex:1;min-width:0;"><div class="db-name">${p.firstName||""} ${p.lastName||""}</div><div class="db-meta">${p.phone||""}${p.email?" · "+p.email:""}</div><div class="db-meta">${p.source||""}${p.neighborhood?" · "+p.neighborhood:""}</div></div>${od?`<span style="font-size:18px;">🔴</span>`:""}</div><div class="db-badges">${dbTierBadge(p.tier)}${dbStageBadge(p.stage)}${p.language?`<span class="badge badge-gray">${p.language}</span>`:""}</div><div class="db-card-footer"><div style="display:flex;flex-direction:column;gap:2px;">${lastContact}${nextFollowUp}</div>${od?`<span class="db-followup-overdue">⚠ ${days}j sans contact</span>`:""}</div></div>`;
+  }).join("");
+  el.innerHTML = filterBar + `<div class="db-grid">${cards}</div>`;
+}
 
+window.dbSetSearch = function(val) { dbSearchQuery = val; renderDatabase(); };
 window.switchView = function(name, el) {
   document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
   document.querySelectorAll(".nav-item").forEach(n=>n.classList.remove("active"));
   document.getElementById(`view-${name}`).classList.add("active");
   if (el) document.querySelectorAll(`[data-view="${name}"]`).forEach(n=>n.classList.add("active"));
   document.getElementById("mobileTitle").textContent =
-    name==="prospects"?"Prospects":name==="dashboard"?"Dashboard":name==="targets"?"Today's Targets":name==="performance"?"My Performance":name==="ops"?"BACHA Ops":"Admin";
+    name==="prospects"?"Prospects":name==="dashboard"?"Dashboard":name==="targets"?"Today's Targets":name==="performance"?"My Performance":name==="ops"?"BACHA Ops":name==="database"?"Database":"Admin";
   if (name==="dashboard") renderDashboard();
   if (name==="admin") renderAdmin();
   if (name==="targets") renderTargetsView();
   if (name==="performance") renderPerformanceView();
-  if (name==="ops") renderOps();
+  if (name==="ops") renderOps(); if (name==="database") renderDatabase();
 };
 window.toggleMobileNav = function() { const d=document.getElementById("mobileDrawer"); d.style.display=d.style.display==="block"?"none":"block"; };
 window.closeMobileNav = function() { document.getElementById("mobileDrawer").style.display="none"; };
 
 // ── Ops Firestore subscriptions ────────────────────────────
+// ── Database ───────────────────────────────────────────────
+let allPeople = [];
+let unsubscribePeople = null;
+let dbActiveTab = "overview";
+let dbSearchQuery = "";
+let dbFilterTier = "all";
+let dbFilterStage = "all";
+let dbFilterSource = "all";
+
+const DB_TIERS = {
+  vip: { label: "⭐⭐⭐ VIP", cls: "db-tier-vip", days: 90 },
+  a:   { label: "⭐⭐ A-Client", cls: "db-tier-a", days: 30 },
+  b:   { label: "⭐ B-Client", cls: "db-tier-b", days: 60 },
+  c:   { label: "C-Client", cls: "db-tier-c", days: 180 },
+};
+const DB_STAGES = ["Lead","Contacted","Nurturing","Client","Past client"];
+const DB_SOURCES = ["Door knock","Open house","Referral","Inbound","Past client","Mailer","Paid Meta ad","Other"];
+const DB_LANGS = ["Français","English","Arabe","Espagnol","Autre"];
+const DB_RELIGIONS = ["Aucune / Non spécifié","Chrétienne","Musulmane","Juive","Hindoue","Autre"];
+
+function subscribeToPeople() {
+  const q = query(collection(db, "people"), orderBy("createdAt", "desc"));
+  unsubscribePeople = onSnapshot(q, snap => {
+    allPeople = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (document.getElementById("view-database")?.classList.contains("active")) renderDatabase();
+  });
+}
+
+function dbDaysSinceContact(p) {
+  if (!p.lastContactDate) return 9999;
+  const d = new Date(p.lastContactDate);
+  const t = new Date(); t.setHours(0,0,0,0);
+  return Math.round((t - d) / 86400000);
+}
+function dbIsOverdue(p) {
+  if (!p.tier || !DB_TIERS[p.tier]) return false;
+  return dbDaysSinceContact(p) > DB_TIERS[p.tier].days;
+}
+function dbTierBadge(tier) {
+  const t = DB_TIERS[tier]; if (!t) return "";
+  return `<span class="${t.cls}">${t.label}</span>`;
+}
+function dbStageBadge(stage) {
+  const colors = {Lead:"#888780",Contacted:"#185FA5",Nurturing:"#BA7517",Client:"#1D9E75","Past client":"#534AB7"};
+  const c = colors[stage]||"#888780";
+  return `<span class="db-stage" style="background:${c}20;color:${c};border:1px solid ${c}40;">${stage||"—"}</span>`;
+}
 function subscribeToOps() {
   const lq = query(collection(db,"ops_listings"), orderBy("createdAt","desc"));
   let _prevListingIds = [];
@@ -1722,9 +1927,10 @@ function prospectCard(p,isDup) {
   const typeBadge=propType==="condo"?`<span class="badge" style="background:#EEEDFE;color:#3C3489;">🏢 Condo</span>`:`<span class="badge" style="background:#EAF3DE;color:#2D6A4F;">🏠 House</span>`;
   const dupBadge=isDup?`<span class="badge" style="background:var(--amber-bg);color:var(--amber);">⚠ Potential duplicate</span>`:"";
   const cardBg=isDup&&dupReviewMode?'border-color:#E9A000;background:#FDF3E7;':isTargeted?'border-color:var(--accent);':"";
+  const promoteBtn=`<button onclick="event.stopPropagation();promoteProspectToDatabase('${p.id}')" title="Ajouter à la Database" style="position:absolute;top:10px;right:44px;width:28px;height:28px;border-radius:50%;border:none;background:var(--border);color:var(--text-3);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;">👥</button>`;
   const targetBtn=`<button onclick="event.stopPropagation();toggleTarget('${p.id}')" title="${isTargeted?"Remove from Today's Targets":"Add to Today's Targets"}" style="position:absolute;top:10px;right:10px;width:28px;height:28px;border-radius:50%;border:none;background:${isTargeted?'var(--accent)':'var(--border)'};color:${isTargeted?'#fff':'var(--text-3)'};font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;">🎯</button>`;
   const clickFn=dupReviewMode?"":exportMode?`toggleSelectProspect('${p.mls}')`:`openProspectModal('${p.id}')`;
-  return `<div class="prospect-card" onclick="${clickFn}" style="position:relative;${cardBg}">${targetBtn}<div class="card-top"><div class="card-avatar">${initials}</div><div class="card-main"><div class="card-name" style="padding-right:32px;">${(p.owners||[]).map(o=>o.name).join(", ")}</div><div class="card-addr">${p.owners?.[0]?.street||""}, ${p.owners?.[0]?.city||""}</div><div class="card-mls">MLS #${p.mls} · Expires ${p.expiry||"—"} · 📍 ${municipality}</div></div></div><div class="card-meta">${statusBadge}${typeBadge}${dupBadge}<span class="badge badge-red">${p.status||"Expiré"}</span></div><div class="card-tracking"><div class="track-item"><div class="track-label">Last price</div><div class="track-value">${lastPrice} ${priceDrop}</div></div><div class="track-item"><div class="track-label">Mailings</div><div class="track-value">${mailings}/4</div></div><div class="track-item"><div class="track-label">Visits</div><div class="track-value">${visits}</div></div></div></div>`;
+  return `<div class="prospect-card" onclick="${clickFn}" style="position:relative;${cardBg}">${promoteBtn}${targetBtn}<div class="card-top"><div class="card-avatar">${initials}</div><div class="card-main"><div class="card-name" style="padding-right:32px;">${(p.owners||[]).map(o=>o.name).join(", ")}</div><div class="card-addr">${p.owners?.[0]?.street||""}, ${p.owners?.[0]?.city||""}</div><div class="card-mls">MLS #${p.mls} · Expires ${p.expiry||"—"} · 📍 ${municipality}</div></div></div><div class="card-meta">${statusBadge}${typeBadge}${dupBadge}<span class="badge badge-red">${p.status||"Expiré"}</span></div><div class="card-tracking"><div class="track-item"><div class="track-label">Last price</div><div class="track-value">${lastPrice} ${priceDrop}</div></div><div class="track-item"><div class="track-label">Mailings</div><div class="track-value">${mailings}/4</div></div><div class="track-item"><div class="track-label">Visits</div><div class="track-value">${visits}</div></div></div></div>`;
 }
 window.startDupReview=function(){const groups=getDupGroups();if(!Object.keys(groups).length){showToast("No duplicates found");return;}dupReviewMode=true;selectedMLS.clear();renderProspects();showDupReviewModal(groups);};
 window.cancelDupReview=function(){dupReviewMode=false;selectedMLS.clear();renderProspects();const banner=document.getElementById("dupBanner");if(banner)banner.style.display="none";};
