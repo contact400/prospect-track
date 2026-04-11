@@ -479,8 +479,7 @@ function setupRoleUI() {
   // Ops nav always shown (access controlled per-dossier)
   document.getElementById("opsNav").style.display="";
   document.getElementById("opsNavMobile").style.display="";
-}
-function renderDatabase() {
+}function renderDatabase() {
   const el = document.getElementById("databaseContent"); if (!el) return;
   document.getElementById("addPersonBtn").style.display = "";
   let list = [...allPeople];
@@ -490,9 +489,19 @@ function renderDatabase() {
   if (dbFilterSource !== "all") list = list.filter(p => p.source === dbFilterSource);
   const overdue = allPeople.filter(p => dbIsOverdue(p));
   document.getElementById("databaseCount").textContent = `${allPeople.length} contact${allPeople.length !== 1 ? "s" : ""}${overdue.length ? ` · ${overdue.length} suivi${overdue.length !== 1 ? "s" : ""} en retard` : ""}`;
+  const selCount = selectedPeople.size;
+  const actionBar = selCount > 0 ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--accent-light);border-radius:var(--radius);margin-bottom:12px;flex-wrap:wrap;">
+    <span style="font-size:13px;font-weight:500;color:var(--accent);flex:1;">${selCount} contact${selCount>1?"s":""} sélectionné${selCount>1?"s":""}</span>
+    <select onchange="dbBulkTier(this.value);this.value=''" style="font-size:12px;padding:5px 8px;border-radius:var(--radius);border:1px solid var(--border);font-family:var(--font);cursor:pointer;"><option value="">Changer le tier...</option><option value="vip">⭐⭐⭐ VIP</option><option value="a">⭐⭐ A-Client</option><option value="b">⭐ B-Client</option><option value="c">C-Client</option></select>
+    <select onchange="dbBulkStage(this.value);this.value=''" style="font-size:12px;padding:5px 8px;border-radius:var(--radius);border:1px solid var(--border);font-family:var(--font);cursor:pointer;"><option value="">Changer l'étape...</option>${DB_STAGES.map(s=>`<option value="${s}">${s}</option>`).join("")}</select>
+    <button onclick="dbExportSelected()" style="padding:5px 12px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--border);font-size:12px;font-family:var(--font);cursor:pointer;">↓ Exporter CSV</button>
+    <button onclick="dbDeleteSelected()" style="padding:5px 12px;border-radius:var(--radius);background:var(--red-bg);color:var(--red);border:none;font-size:12px;font-family:var(--font);cursor:pointer;">🗑 Supprimer</button>
+    <button onclick="selectedPeople.clear();renderDatabase()" style="padding:5px 12px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--border);font-size:12px;font-family:var(--font);cursor:pointer;">✕ Désélectionner</button>
+  </div>` : "";
   const filterBar = `<div class="db-filter-bar"><input class="db-search" type="text" placeholder="Rechercher un contact..." value="${dbSearchQuery}" oninput="dbSetSearch(this.value)"><select class="ops-status-sel" onchange="dbSetFilterTier(this.value)"><option value="all">Tous les tiers</option><option value="vip"${dbFilterTier==="vip"?" selected":""}>⭐⭐⭐ VIP</option><option value="a"${dbFilterTier==="a"?" selected":""}>⭐⭐ A-Client</option><option value="b"${dbFilterTier==="b"?" selected":""}>⭐ B-Client</option><option value="c"${dbFilterTier==="c"?" selected":""}>C-Client</option></select><select class="ops-status-sel" onchange="dbSetFilterStage(this.value)"><option value="all">Toutes les étapes</option>${DB_STAGES.map(s=>`<option value="${s}"${dbFilterStage===s?" selected":""}>${s}</option>`).join("")}</select><select class="ops-status-sel" onchange="dbSetFilterSource(this.value)"><option value="all">Toutes les sources</option>${DB_SOURCES.map(s=>`<option value="${s}"${dbFilterSource===s?" selected":""}>${s}</option>`).join("")}</select></div>`;
-  if (!list.length) { el.innerHTML = filterBar + `<div class="empty-state"><div class="empty-icon">👥</div><div class="empty-title">Aucun contact trouvé</div><div class="empty-sub">Ajoutez votre premier contact ou ajustez les filtres.</div></div>`; return; }
-  const header = `<div style="display:grid;grid-template-columns:2fr 1.2fr 1.2fr 1fr 1fr 1fr 1fr;gap:0;padding:8px 16px;border-bottom:1px solid var(--border);background:var(--bg);"><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Nom</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Téléphone</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Courriel</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Tier</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Étape</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Dernière activité</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Agent</span></div>`;
+  if (!list.length) { el.innerHTML = actionBar + filterBar + `<div class="empty-state"><div class="empty-icon">👥</div><div class="empty-title">Aucun contact trouvé</div><div class="empty-sub">Ajoutez votre premier contact ou ajustez les filtres.</div></div>`; return; }
+  const allSelected = list.length > 0 && list.every(p => selectedPeople.has(p.id));
+  const header = `<div style="display:grid;grid-template-columns:40px 2fr 1.2fr 1.2fr 1fr 1fr 1fr 1fr;gap:0;padding:8px 16px;border-bottom:1px solid var(--border);background:var(--bg);"><div style="display:flex;align-items:center;"><input type="checkbox" ${allSelected?"checked":""} onchange="dbToggleAll(this.checked)" style="width:16px;height:16px;cursor:pointer;"></div><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Nom</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Téléphone</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Courriel</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Tier</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Étape</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Dernière activité</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Agent</span></div>`;
   const rows = list.map(p => {
     const initials = `${(p.firstName||"?")[0]}${(p.lastName||"")[0]||""}`.toUpperCase();
     const avatarBg = p.tier==="vip"?"#E9A000":p.tier==="a"?"#185FA5":p.tier==="b"?"#1D9E75":"#888780";
@@ -500,23 +509,31 @@ function renderDatabase() {
     const days = dbDaysSinceContact(p);
     const lastActivity = p.lastContactDate ? `${days === 0 ? "Aujourd'hui" : days + "j"} · ${p.lastContactDate}` : "Jamais";
     const lastActivityColor = od ? "#C41230" : "var(--text-3)";
-    return `<div onclick="openPersonModal('${p.id}')" style="display:grid;grid-template-columns:2fr 1.2fr 1.2fr 1fr 1fr 1fr 1fr;gap:0;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.1s;background:var(--surface);" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background='var(--surface)'">
-      <div style="display:flex;align-items:center;gap:10px;">
+    const isSel = selectedPeople.has(p.id);
+    return `<div style="display:grid;grid-template-columns:40px 2fr 1.2fr 1.2fr 1fr 1fr 1fr 1fr;gap:0;padding:12px 16px;border-bottom:1px solid var(--border);background:${isSel?"var(--accent-light)":"var(--surface)"};transition:background 0.1s;" onmouseover="if(!${isSel})this.style.background='var(--bg)'" onmouseout="if(!${isSel})this.style.background='var(--surface)'">
+      <div style="display:flex;align-items:center;" onclick="event.stopPropagation()"><input type="checkbox" ${isSel?"checked":""} onchange="dbToggleSelect('${p.id}',this.checked)" style="width:16px;height:16px;cursor:pointer;"></div>
+      <div style="display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="openPersonModal('${p.id}')">
         <div style="width:32px;height:32px;border-radius:50%;background:${avatarBg};color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;">${initials}</div>
         <div><div style="font-size:13px;font-weight:500;color:var(--text);">${p.firstName||""} ${p.lastName||""}</div><div style="font-size:11px;color:var(--text-3);">${p.source||""}${p.neighborhood?" · "+p.neighborhood:""}</div></div>
-        ${od?`<span style="width:6px;height:6px;border-radius:50%;background:#C41230;flex-shrink:0;" title="Suivi en retard"></span>`:""}
+        ${od?`<span style="width:6px;height:6px;border-radius:50%;background:#C41230;flex-shrink:0;"></span>`:""}
       </div>
-      <div style="font-size:13px;color:var(--text-2);align-self:center;">${p.phone||"—"}</div>
-      <div style="font-size:13px;color:var(--text-2);align-self:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.email||"—"}</div>
-      <div style="align-self:center;">${dbTierBadge(p.tier)||`<span style="color:var(--text-3);font-size:12px;">—</span>`}</div>
-      <div style="align-self:center;">${dbStageBadge(p.stage)||`<span style="color:var(--text-3);font-size:12px;">—</span>`}</div>
-      <div style="font-size:12px;color:${lastActivityColor};align-self:center;">${lastActivity}</div>
-      <div style="font-size:12px;color:var(--text-2);align-self:center;">${p.assignedAgent||"—"}</div>
+      <div style="font-size:13px;color:var(--text-2);align-self:center;cursor:pointer;" onclick="openPersonModal('${p.id}')">${p.phone||"—"}</div>
+      <div style="font-size:13px;color:var(--text-2);align-self:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;" onclick="openPersonModal('${p.id}')">${p.email||"—"}</div>
+      <div style="align-self:center;cursor:pointer;" onclick="openPersonModal('${p.id}')">${dbTierBadge(p.tier)||`<span style="color:var(--text-3);font-size:12px;">—</span>`}</div>
+      <div style="align-self:center;cursor:pointer;" onclick="openPersonModal('${p.id}')">${dbStageBadge(p.stage)||`<span style="color:var(--text-3);font-size:12px;">—</span>`}</div>
+      <div style="font-size:12px;color:${lastActivityColor};align-self:center;cursor:pointer;" onclick="openPersonModal('${p.id}')">${lastActivity}</div>
+      <div style="font-size:12px;color:var(--text-2);align-self:center;cursor:pointer;" onclick="openPersonModal('${p.id}')">${p.assignedAgent||"—"}</div>
     </div>`;
   }).join("");
-  el.innerHTML = filterBar + `<div style="border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;">${header}${rows}</div>`;
+  el.innerHTML = actionBar + filterBar + `<div style="border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;">${header}${rows}</div>`;
+  const s = document.querySelector(".db-search"); if (s && dbSearchQuery) { s.focus(); s.setSelectionRange(dbSearchQuery.length, dbSearchQuery.length); }
 }
-
+window.dbToggleSelect = function(id, checked) { if (checked) selectedPeople.add(id); else selectedPeople.delete(id); renderDatabase(); };
+window.dbToggleAll = function(checked) { const list = allPeople.filter(p => (dbFilterTier==="all"||p.tier===dbFilterTier)&&(dbFilterStage==="all"||p.stage===dbFilterStage)&&(dbFilterSource==="all"||p.source===dbFilterSource)); list.forEach(p => checked ? selectedPeople.add(p.id) : selectedPeople.delete(p.id)); renderDatabase(); };
+window.dbBulkTier = async function(tier) { if (!tier||!selectedPeople.size) return; if (!confirm(`Changer le tier de ${selectedPeople.size} contact(s)?`)) return; for (const id of selectedPeople) { await updateDoc(doc(db,"people",id),{tier,updatedAt:serverTimestamp()}); } selectedPeople.clear(); showToast("Tier mis à jour ✓"); };
+window.dbBulkStage = async function(stage) { if (!stage||!selectedPeople.size) return; if (!confirm(`Changer l'étape de ${selectedPeople.size} contact(s)?`)) return; for (const id of selectedPeople) { await updateDoc(doc(db,"people",id),{stage,updatedAt:serverTimestamp()}); } selectedPeople.clear(); showToast("Étape mise à jour ✓"); };
+window.dbDeleteSelected = async function() { if (!selectedPeople.size) return; if (!confirm(`Supprimer ${selectedPeople.size} contact(s)? Irréversible.`)) return; for (const id of selectedPeople) { await deleteDoc(doc(db,"people",id)); } selectedPeople.clear(); showToast("Contacts supprimés"); };
+window.dbExportSelected = function() { const sel = allPeople.filter(p => selectedPeople.has(p.id)); const rows = [["Prénom","Nom","Téléphone","Courriel","Tier","Étape","Source","Agent","Quartier","Dernier contact"]]; sel.forEach(p => rows.push([p.firstName||"",p.lastName||"",p.phone||"",p.email||"",DB_TIERS[p.tier]?.label||p.tier||"",p.stage||"",p.source||"",p.assignedAgent||"",p.neighborhood||"",p.lastContactDate||""])); const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n"); const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"})); a.download = "database-export.csv"; a.click(); showToast(`${sel.length} contact(s) exportés`); };
 window.dbSetSearch = function(val) { dbSearchQuery = val; renderDatabase(); const el = document.querySelector(".db-search"); if (el) { el.focus(); el.setSelectionRange(val.length, val.length); } };
 window.dbSetFilterTier = function(val) { dbFilterTier = val; renderDatabase(); };
 window.dbSetFilterStage = function(val) { dbFilterStage = val; renderDatabase(); };
