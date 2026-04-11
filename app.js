@@ -233,7 +233,7 @@ window.handleLogin = async function() {
   try { await signInWithEmailAndPassword(auth,email,password); }
   catch(e) { err.textContent="Invalid email or password."; err.style.display="block"; btn.textContent="Sign in"; btn.disabled=false; }
 };
-window.openAddPerson = function() { openPersonModal(null); };
+window.openAddPerson = function() { dbOpenEdit(null); };
 
 window.openPersonModal = function(id) {
   const p = id ? allPeople.find(x=>x.id===id) : null;
@@ -320,7 +320,7 @@ const m = document.getElementById("opsModal");
 };
 
 window.dbOpenEdit = function(id) {
-  const p = allPeople.find(x=>x.id===id); if (!p) return;
+const p = id ? allPeople.find(x=>x.id===id) : null;
   const g = f => p?.[f]||"";
   const html = `
     <div class="modal-header"><div><div class="modal-title">Modifier — ${g("firstName")} ${g("lastName")}</div></div><button class="close-x" onclick="closeAllModals()">×</button></div>
@@ -366,7 +366,7 @@ window.dbOpenEdit = function(id) {
     </div>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="openPersonModal('${p.id}')">Annuler</button>
-      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="dbSavePerson('${p.id}')">Enregistrer</button>
+      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="dbSavePerson('${p?.id||""}')">Enregistrer</button>
     </div>`;
 document.getElementById("opsModalContent").innerHTML = html;
   document.getElementById("opsModal").style.width = "";
