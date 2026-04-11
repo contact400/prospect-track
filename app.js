@@ -238,16 +238,94 @@ window.openAddPerson = function() { openPersonModal(null); };
 window.openPersonModal = function(id) {
   const p = id ? allPeople.find(x=>x.id===id) : null;
   const g = f => p?.[f]||"";
-  document.getElementById("opsModalContent").innerHTML = `
-    <div class="modal-header">
-      <div><div class="modal-title">${p?"Modifier le contact":"Nouveau contact"}</div></div>
-      <button class="close-x" onclick="closeAllModals()">×</button>
-    </div>
+  const initials = p ? `${(p.firstName||"?")[0]}${(p.lastName||"")[0]||""}`.toUpperCase() : "?";
+  const avatarBg = p?.tier==="vip"?"#E9A000":p?.tier==="a"?"#185FA5":p?.tier==="b"?"#1D9E75":"#888780";
+  const od = p ? dbIsOverdue(p) : false;
+  const leftPanel = `
+    <div style="width:260px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;padding:20px 16px;">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+        <button class="close-x" onclick="closeAllModals()" style="position:static;">×</button>
+      </div>
+      <div style="text-align:center;margin-bottom:16px;">
+        <div style="width:56px;height:56px;border-radius:50%;background:${avatarBg};color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;margin:0 auto 8px;">${initials}</div>
+        <div style="font-size:16px;font-weight:700;color:var(--text);">${g("firstName")} ${g("lastName")}</div>
+        ${od ? `<div style="font-size:11px;color:#C41230;margin-top:4px;">⚠ Suivi en retard</div>` : ""}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;">
+        ${g("phone") ? `<div style="font-size:13px;color:var(--text-2);">📞 ${g("phone")}</div>` : ""}
+        ${g("email") ? `<div style="font-size:13px;color:var(--text-2);">✉ ${g("email")}</div>` : ""}
+        ${g("neighborhood") ? `<div style="font-size:13px;color:var(--text-2);">📍 ${g("neighborhood")}</div>` : ""}
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:12px;">
+        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:8px;">Profil CRM</div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Tier</span><span>${dbTierBadge(g("tier"))||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Étape</span><span>${dbStageBadge(g("stage"))||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Source</span><span style="font-size:12px;color:var(--text-2);">${g("source")||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Agent</span><span style="font-size:12px;color:var(--text-2);">${g("assignedAgent")||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Dernier contact</span><span style="font-size:12px;color:var(--text-2);">${g("lastContactDate")||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Prochain suivi</span><span style="font-size:12px;color:${p?.nextFollowUp&&new Date(p.nextFollowUp)<new Date()?"#C41230":"var(--text-2)"};">${g("nextFollowUp")||"—"}</span></div>
+        </div>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:12px;">
+        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:8px;">Profil immobilier</div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Type</span><span style="font-size:12px;color:var(--text-2);">${g("propertyType")||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Statut</span><span style="font-size:12px;color:var(--text-2);">${g("ownerStatus")||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Intérêt</span><span style="font-size:12px;color:var(--text-2);">${g("intent")||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Renouvellement</span><span style="font-size:12px;color:var(--text-2);">${g("mortgageRenewal")||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Valeur estimée</span><span style="font-size:12px;color:var(--text-2);">${g("propertyValue")||"—"}</span></div>
+        </div>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:12px;">
+        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:8px;">Personnel</div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Langue</span><span style="font-size:12px;color:var(--text-2);">${g("language")||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Religion</span><span style="font-size:12px;color:var(--text-2);">${g("religion")||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Anniversaire</span><span style="font-size:12px;color:var(--text-2);">${g("birthday")||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Mariage</span><span style="font-size:12px;color:var(--text-2);">${g("weddingAnniversary")||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Référé par</span><span style="font-size:12px;color:var(--text-2);">${g("referredBy")||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Engagement</span><span style="font-size:12px;color:var(--text-2);">${g("engagement")==="hot"?"🔥 Hot":g("engagement")==="warm"?"🌡 Warm":g("engagement")==="cold"?"🧊 Cold":"—"}</span></div>
+        </div>
+      </div>
+      ${g("notes") ? `<div style="border-top:1px solid var(--border);padding-top:12px;"><div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:6px;">Notes</div><div style="font-size:12px;color:var(--text-2);line-height:1.5;">${g("notes")}</div></div>` : ""}
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+        ${p ? `<button onclick="dbOpenEdit('${p.id}')" style="flex:1;padding:7px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--border);font-size:12px;font-family:var(--font);cursor:pointer;">✏ Modifier</button>` : ""}
+        ${p && isAdmin ? `<button onclick="dbDeletePerson('${p.id}')" style="padding:7px 10px;border-radius:var(--radius);background:var(--red-bg);color:var(--red);border:none;font-size:12px;font-family:var(--font);cursor:pointer;">Supprimer</button>` : ""}
+      </div>
+    </div>`;
+  const centerPanel = `
+    <div style="flex:1;overflow-y:auto;padding:20px;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text);">Journal d'activité</div>
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <input type="text" id="pm-log-text" placeholder="Ajouter une note ou interaction..." style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;font-family:var(--font);">
+        <button onclick="dbAddLog('${p?.id||""}')" style="padding:8px 16px;border-radius:var(--radius);background:var(--accent);color:#fff;border:none;font-size:13px;font-family:var(--font);cursor:pointer;white-space:nowrap;">+ Ajouter</button>
+      </div>
+      <div id="pm-timeline">${p ? dbRenderTimeline(p) : `<div style="font-size:13px;color:var(--text-3);">Aucune activité.</div>`}</div>
+    </div>`;
+  const linkedListings = opsListings.filter(l => l.linkedPersonId === p?.id);
+  const linkedPurchases = opsPurchases.filter(l => l.linkedPersonId === p?.id);
+  const allLinked = [...linkedListings.map(l=>({...l,_type:"inscription"})), ...linkedPurchases.map(l=>({...l,_type:"achat"}))];
+  const dealsHtml = allLinked.length ? allLinked.map(l=>`<div style="border:1px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:8px;cursor:pointer;" onclick="closeAllModals();switchView('ops',null)"><div style="font-size:10px;font-weight:600;text-transform:uppercase;color:${l._type==="inscription"?"#185FA5":"#1D9E75"};margin-bottom:4px;">${l._type==="inscription"?"Inscription":"Achat"}</div><div style="font-size:13px;font-weight:500;color:var(--text);">${l.addr||l.address||"—"}</div><div style="font-size:12px;color:var(--text-3);margin-top:2px;">${l.price||"—"}</div></div>`).join("") : `<div style="font-size:12px;color:var(--text-3);">Aucun dossier lié.</div>`;
+  const rightPanel = `
+    <div style="width:220px;flex-shrink:0;border-left:1px solid var(--border);overflow-y:auto;padding:20px 16px;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text);">Dossiers liés</div>
+      ${dealsHtml}
+    </div>`;
+  document.getElementById("opsModalContent").innerHTML = `<div style="display:flex;height:75vh;overflow:hidden;">${leftPanel}${centerPanel}${rightPanel}</div>`;
+  openModal("opsModal");
+};
+
+window.dbOpenEdit = function(id) {
+  const p = allPeople.find(x=>x.id===id); if (!p) return;
+  const g = f => p?.[f]||"";
+  const html = `
+    <div class="modal-header"><div><div class="modal-title">Modifier — ${g("firstName")} ${g("lastName")}</div></div><button class="close-x" onclick="closeAllModals()">×</button></div>
     <div class="mbody-ops" style="max-height:70vh;overflow-y:auto;padding-right:4px;">
       <div class="ops-offer-section-title">Identité</div>
       <div class="pm-grid">
-        <div class="pm-field"><label>Prénom</label><input type="text" id="pm-fn" value="${g("firstName")}" placeholder="Jean"></div>
-        <div class="pm-field"><label>Nom</label><input type="text" id="pm-ln" value="${g("lastName")}" placeholder="Tremblay"></div>
+        <div class="pm-field"><label>Prénom</label><input type="text" id="pm-fn" value="${g("firstName")}"></div>
+        <div class="pm-field"><label>Nom</label><input type="text" id="pm-ln" value="${g("lastName")}"></div>
         <div class="pm-field"><label>Téléphone</label><input type="text" id="pm-phone" value="${g("phone")}"></div>
         <div class="pm-field"><label>Courriel</label><input type="text" id="pm-email" value="${g("email")}"></div>
         <div class="pm-field"><label>Date de naissance</label><input type="date" id="pm-bday" value="${g("birthday")}"></div>
@@ -266,38 +344,30 @@ window.openPersonModal = function(id) {
       </div>
       <div class="ops-offer-section-title" style="margin-top:1rem;">Profil immobilier</div>
       <div class="pm-grid">
-        <div class="pm-field"><label>Quartier / Secteur</label><input type="text" id="pm-hood" value="${g("neighborhood")}" placeholder="Laval, Vimont..."></div>
-        <div class="pm-field"><label>Type de propriété actuelle</label><select id="pm-proptype"><option value="">—</option><option value="Condo"${g("propertyType")==="Condo"?" selected":""}>Condo</option><option value="Maison"${g("propertyType")==="Maison"?" selected":""}>Maison</option><option value="Duplex"${g("propertyType")==="Duplex"?" selected":""}>Duplex</option><option value="Locataire"${g("propertyType")==="Locataire"?" selected":""}>Locataire</option></select></div>
+        <div class="pm-field"><label>Quartier / Secteur</label><input type="text" id="pm-hood" value="${g("neighborhood")}"></div>
+        <div class="pm-field"><label>Type de propriété</label><select id="pm-proptype"><option value="">—</option><option value="Condo"${g("propertyType")==="Condo"?" selected":""}>Condo</option><option value="Maison"${g("propertyType")==="Maison"?" selected":""}>Maison</option><option value="Duplex"${g("propertyType")==="Duplex"?" selected":""}>Duplex</option><option value="Locataire"${g("propertyType")==="Locataire"?" selected":""}>Locataire</option></select></div>
         <div class="pm-field"><label>Propriétaire ou locataire</label><select id="pm-own"><option value="">—</option><option value="Propriétaire"${g("ownerStatus")==="Propriétaire"?" selected":""}>Propriétaire</option><option value="Locataire"${g("ownerStatus")==="Locataire"?" selected":""}>Locataire</option></select></div>
-        <div class="pm-field"><label>Renouvellement hypothèque</label><input type="text" id="pm-mort" value="${g("mortgageRenewal")}" placeholder="ex: 2026"></div>
+        <div class="pm-field"><label>Renouvellement hypothèque</label><input type="text" id="pm-mort" value="${g("mortgageRenewal")}"></div>
         <div class="pm-field"><label>Intérêt</label><select id="pm-intent"><option value="">—</option><option value="Acheter"${g("intent")==="Acheter"?" selected":""}>Acheter</option><option value="Vendre"${g("intent")==="Vendre"?" selected":""}>Vendre</option><option value="Investir"${g("intent")==="Investir"?" selected":""}>Investir</option><option value="Louer"${g("intent")==="Louer"?" selected":""}>Louer</option></select></div>
-        <div class="pm-field"><label>Valeur estimée propriété</label><input type="text" id="pm-val" value="${g("propertyValue")}" placeholder="ex: 550 000 $"></div>
+        <div class="pm-field"><label>Valeur estimée</label><input type="text" id="pm-val" value="${g("propertyValue")}"></div>
       </div>
-      <div class="ops-offer-section-title" style="margin-top:1rem;">Relation & référence</div>
+      <div class="ops-offer-section-title" style="margin-top:1rem;">Relation</div>
       <div class="pm-grid">
-        <div class="pm-field"><label>Référé par</label><input type="text" id="pm-ref" value="${g("referredBy")}" placeholder="Nom du référent"></div>
+        <div class="pm-field"><label>Référé par</label><input type="text" id="pm-ref" value="${g("referredBy")}"></div>
         <div class="pm-field"><label>Engagement</label><select id="pm-eng"><option value="">—</option><option value="hot"${g("engagement")==="hot"?" selected":""}>🔥 Hot</option><option value="warm"${g("engagement")==="warm"?" selected":""}>🌡 Warm</option><option value="cold"${g("engagement")==="cold"?" selected":""}>🧊 Cold</option></select></div>
-        <div class="pm-field"><label>Enfants (ages)</label><input type="text" id="pm-kids" value="${g("kidsAges")}" placeholder="ex: 3, 7, 12"></div>
+        <div class="pm-field"><label>Enfants (ages)</label><input type="text" id="pm-kids" value="${g("kidsAges")}"></div>
         <div class="pm-field"><label>Anniversaire emménagement</label><input type="date" id="pm-movein" value="${g("moveInAnniversary")}"></div>
       </div>
       <div class="ops-offer-section-title" style="margin-top:1rem;">Notes</div>
       <textarea id="pm-notes" rows="3" style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;">${g("notes")}</textarea>
-      ${p ? `
-      <div class="ops-offer-section-title" style="margin-top:1rem;">Journal d'activité</div>
-      <div style="display:flex;gap:8px;margin-bottom:10px;">
-        <input type="text" id="pm-log-text" placeholder="Ajouter une note ou interaction..." style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:var(--font);">
-        <button onclick="dbAddLog('${p.id}')" style="padding:7px 14px;border-radius:6px;background:var(--accent);color:#fff;border:none;font-size:13px;font-family:var(--font);cursor:pointer;white-space:nowrap;">+ Ajouter</button>
-      </div>
-      <div id="pm-timeline">${dbRenderTimeline(p)}</div>` : ""}
     </div>
     <div class="modal-actions">
-      ${p&&isAdmin?`<button class="btn-danger" onclick="dbDeletePerson('${p.id}')">Supprimer</button>`:""}
-      <button class="btn-secondary" onclick="closeAllModals()">Annuler</button>
-      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="dbSavePerson('${p?.id||""}')">Enregistrer</button>
+      <button class="btn-secondary" onclick="openPersonModal('${p.id}')">Annuler</button>
+      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="dbSavePerson('${p.id}')">Enregistrer</button>
     </div>`;
+  document.getElementById("opsModalContent").innerHTML = html;
   openModal("opsModal");
 };
-
 function dbRenderTimeline(p) {
   const logs = (p.timeline||[]).slice().reverse();
   if (!logs.length) return `<div style="font-size:13px;color:var(--text-3);padding:8px 0;">Aucune activité enregistrée.</div>`;
