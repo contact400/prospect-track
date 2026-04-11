@@ -515,7 +515,7 @@ function renderDatabase() {
   el.innerHTML = filterBar + `<div style="border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;">${header}${rows}</div>`;
 }
 
-window.dbSetSearch = function(val) { dbSearchQuery = val; renderDatabase(); };
+window.dbSetSearch = function(val) { dbSearchQuery = val; renderDatabase(); const el = document.querySelector(".db-search"); if (el) { el.focus(); el.setSelectionRange(val.length, val.length); } };
 window.dbSetFilterTier = function(val) { dbFilterTier = val; renderDatabase(); };
 window.dbSetFilterStage = function(val) { dbFilterStage = val; renderDatabase(); };
 window.dbSetFilterSource = function(val) { dbFilterSource = val; renderDatabase(); };
