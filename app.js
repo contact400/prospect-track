@@ -379,7 +379,7 @@ function dbRenderTimeline(p) {
   if (!logs.length) return `<div style="font-size:13px;color:var(--text-3);padding:8px 0;">Aucune activité enregistrée.</div>`;
   return logs.map(l=>{
     const dotCls = l.type==="transaction"?"tl-dot tl-dot-transaction":l.type==="note"?"tl-dot tl-dot-note":"tl-dot";
-    return `<div class="tl-entry"><div class="${dotCls}"></div><div class="tl-content"><div class="tl-text">${l.text}</div><div class="tl-time">${l.date||""} · ${l.by||""}</div></div></div>`;
+    return `<div class="tl-entry"><div class="${dotCls}"></div><div class="tl-content"><div class="tl-text" style="word-break:break-word;overflow-wrap:break-word;white-space:normal;">${l.text}</div><div class="tl-time">${l.date||""} · ${l.by||""}</div></div></div>`;
   }).join("");
 }
 
