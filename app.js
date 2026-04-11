@@ -286,7 +286,9 @@ window.openPersonModal = function(id) {
           <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Anniversaire</span><span style="font-size:12px;color:var(--text-2);">${g("birthday")||"—"}</span></div>
           <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Mariage</span><span style="font-size:12px;color:var(--text-2);">${g("weddingAnniversary")||"—"}</span></div>
           <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Référé par</span><span style="font-size:12px;color:var(--text-2);">${g("referredBy")||"—"}</span></div>
-          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Engagement</span><span style="font-size:12px;color:var(--text-2);">${g("engagement")==="hot"?"🔥 Hot":g("engagement")==="warm"?"🌡 Warm":g("engagement")==="cold"?"🧊 Cold":"—"}</span></div>
+         <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Enfants (âges)</span><span style="font-size:12px;color:var(--text-2);">${g("kidsAges")||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Emménagement</span><span style="font-size:12px;color:var(--text-2);">${g("moveInAnniversary")||"—"}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-3);">Valeur propriété</span><span style="font-size:12px;color:var(--text-2);">${g("propertyValue")||"—"}</span></div>
         </div>
       </div>
       ${g("notes") ? `<div style="border-top:1px solid var(--border);padding-top:12px;"><div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:6px;">Notes</div><div style="font-size:12px;color:var(--text-2);line-height:1.5;">${g("notes")}</div></div>` : ""}
