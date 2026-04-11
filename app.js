@@ -313,6 +313,8 @@ window.openPersonModal = function(id) {
       ${dealsHtml}
     </div>`;
   document.getElementById("opsModalContent").innerHTML = `<div style="display:flex;height:75vh;overflow:hidden;">${leftPanel}${centerPanel}${rightPanel}</div>`;
+const m = document.getElementById("opsModal");
+  m.style.width = "820px";
   openModal("opsModal");
 };
 
@@ -365,7 +367,8 @@ window.dbOpenEdit = function(id) {
       <button class="btn-secondary" onclick="openPersonModal('${p.id}')">Annuler</button>
       <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="dbSavePerson('${p.id}')">Enregistrer</button>
     </div>`;
-  document.getElementById("opsModalContent").innerHTML = html;
+document.getElementById("opsModalContent").innerHTML = html;
+  document.getElementById("opsModal").style.width = "";
   openModal("opsModal");
 };
 function dbRenderTimeline(p) {
