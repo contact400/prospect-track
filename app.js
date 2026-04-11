@@ -298,7 +298,7 @@ window.openPersonModal = function(id) {
       </div>
     </div>`;
   const centerPanel = `
-    <div style="flex:1;overflow-y:auto;padding:20px;">
+    <div style="flex:2;overflow-y:auto;padding:20px;min-width:0;">
       <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text);">Journal d'activité</div>
       <div style="display:flex;gap:8px;margin-bottom:16px;">
         <input type="text" id="pm-log-text" placeholder="Ajouter une note ou interaction..." style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;font-family:var(--font);">
@@ -390,7 +390,9 @@ window.dbAddLog = async function(id) {
   const entry = { id:"l"+Date.now(), text, type:"note", date:new Date().toISOString().slice(0,10), by:currentUserProfile?.name||currentUser.email };
   const timeline = [...(p.timeline||[]), entry];
   await updateDoc(doc(db,"people",id),{timeline, lastContactDate:entry.date, updatedAt:serverTimestamp()});
-  document.getElementById("pm-log-text").value="";
+document.getElementById("pm-log-text").value="";
+  const updatedP = allPeople.find(x=>x.id===id);
+  if (updatedP) document.getElementById("pm-timeline").innerHTML = dbRenderTimeline({...updatedP, timeline});
   showToast("Note ajoutée ✓");
 };
 
