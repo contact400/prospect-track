@@ -530,6 +530,105 @@ function setupRoleUI() {
 }
 window.dbToggleSelect = function(id, checked) { if (checked) selectedPeople.add(id); else selectedPeople.delete(id); renderDatabase(); };
 window.dbDeselectAll = function() { selectedPeople.clear(); renderDatabase(); };
+function getDbDupGroups() {
+  const seen = {}; const groups = {};
+  allPeople.forEach(p => {
+    const key = `${(p.firstName||"").toLowerCase().trim()}|${(p.lastName||"").toLowerCase().trim()}|${(p.email||"").toLowerCase().trim()}`;
+    if (!key || key === "||") return;
+    if (!seen[key]) { seen[key] = []; }
+    seen[key].push(p);
+  });
+  Object.entries(seen).forEach(([key, group]) => {
+    if (group.length > 1) {
+      group.sort((a,b) => (a.createdAt?.toMillis?.()||0) - (b.createdAt?.toMillis?.()||0));
+      groups[key] = group;
+    }
+  });
+  return groups;
+}
+
+window.showDbDupModal = function() {
+  const groups = getDbDupGroups();
+  const keys = Object.keys(groups);
+  if (!keys.length) { showToast("Aucun doublon trouvé ✓"); return; }
+  const groupsHtml = keys.map(key => {
+    const group = groups[key];
+    const master = group[0];
+    const dupes = group.slice(1);
+    const masterName = `${master.firstName||""} ${master.lastName||""}`.trim();
+    const dupesHtml = dupes.map(d => {
+      const dName = `${d.firstName||""} ${d.lastName||""}`.trim();
+      return `<div style="background:#FDF3E7;border:1px solid #E9A000;border-radius:8px;padding:10px 12px;margin-top:8px;">
+        <div style="font-size:12px;font-weight:500;color:#7A4F1D;margin-bottom:4px;">Doublon — sera fusionné puis supprimé</div>
+        <div style="font-size:13px;font-weight:500;">${dName}</div>
+        <div style="font-size:12px;color:var(--text-3);">${d.email||""} · ${d.phone||""} · Ajouté ${d.createdAt?.toDate?d.createdAt.toDate().toLocaleDateString("fr-CA"):"—"}</div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button onclick="mergeDbContacts('${master.id}','${d.id}')" style="flex:1;padding:7px;border-radius:6px;background:var(--accent);color:#fff;border:none;font-size:12px;font-family:var(--font);cursor:pointer;font-weight:500;">⇒ Fusionner dans le master</button>
+          <button onclick="deleteDbDup('${d.id}')" style="padding:7px 10px;border-radius:6px;background:var(--red-bg);color:var(--red);border:none;font-size:12px;font-family:var(--font);cursor:pointer;">Supprimer</button>
+        </div>
+      </div>`;
+    }).join("");
+    return `<div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px;background:var(--surface);">
+      <div style="background:var(--accent-light);border:1px solid var(--accent);border-radius:8px;padding:10px 12px;margin-bottom:4px;">
+        <div style="font-size:12px;font-weight:500;color:var(--accent);margin-bottom:4px;">✓ Master — sera conservé</div>
+        <div style="font-size:13px;font-weight:500;">${masterName}</div>
+        <div style="font-size:12px;color:var(--text-3);">${master.email||""} · ${master.phone||""} · Ajouté ${master.createdAt?.toDate?master.createdAt.toDate().toLocaleDateString("fr-CA"):"—"}</div>
+      </div>${dupesHtml}
+    </div>`;
+  }).join("");
+  document.getElementById("opsModalContent").innerHTML = `
+    <div class="modal-header"><div><div class="modal-title">Doublons Database</div><div class="modal-sub">${keys.length} groupe${keys.length>1?"s":""} de doublons</div></div><button class="close-x" onclick="closeAllModals()">×</button></div>
+    <div style="background:var(--accent-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--accent);line-height:1.6;">Le contact le plus ancien devient le master. Les notes et l'historique sont fusionnés, puis le doublon est supprimé.</div>
+    <div style="margin-bottom:12px;"><button onclick="mergeAllDbDuplicates()" style="width:100%;padding:10px;border-radius:8px;background:var(--accent);color:#fff;border:none;font-size:13px;font-family:var(--font);cursor:pointer;font-weight:500;">⇒ Fusionner tous les doublons automatiquement</button></div>
+    <div class="mbody-ops" style="max-height:60vh;overflow-y:auto;">${groupsHtml}</div>
+    <div class="modal-actions"><button class="btn-secondary" onclick="closeAllModals()">Fermer</button></div>`;
+  openModal("opsModal");
+};
+
+window.mergeDbContacts = async function(masterId, dupId) {
+  const master = allPeople.find(p=>p.id===masterId);
+  const dup = allPeople.find(p=>p.id===dupId);
+  if (!master||!dup) return;
+  const mergedTimeline = [...(master.timeline||[]), ...(dup.timeline||[])];
+  const mergedNotes = [master.notes, dup.notes].filter(Boolean).join("\n\n");
+  await updateDoc(doc(db,"people",masterId), {timeline:mergedTimeline, notes:mergedNotes, updatedAt:serverTimestamp()});
+  await deleteDoc(doc(db,"people",dupId));
+  showToast("Fusionné ✓");
+  const groups = getDbDupGroups();
+  if (!Object.keys(groups).length) { closeAllModals(); showToast("Tous les doublons résolus ✓"); }
+  else window.showDbDupModal();
+};
+
+window.deleteDbDup = async function(id) {
+  if (!confirm("Supprimer ce doublon sans fusionner?")) return;
+  await deleteDoc(doc(db,"people",id));
+  showToast("Supprimé");
+  const groups = getDbDupGroups();
+  if (!Object.keys(groups).length) closeAllModals();
+  else window.showDbDupModal();
+};
+
+window.mergeAllDbDuplicates = async function() {
+  if (!confirm("Fusionner tous les doublons automatiquement?")) return;
+  const groups = getDbDupGroups();
+  let merged = 0;
+  for (const key of Object.keys(groups)) {
+    const group = groups[key];
+    const master = group[0];
+    const dupes = group.slice(1);
+    let mergedTimeline = [...(master.timeline||[])];
+    let mergedNotes = master.notes||"";
+    for (const dup of dupes) {
+      mergedTimeline = [...mergedTimeline, ...(dup.timeline||[])];
+      if (dup.notes) mergedNotes = [mergedNotes, dup.notes].filter(Boolean).join("\n\n");
+      await deleteDoc(doc(db,"people",dup.id));
+      merged++;
+    }
+    await updateDoc(doc(db,"people",master.id), {timeline:mergedTimeline, notes:mergedNotes, updatedAt:serverTimestamp()});
+  }
+  closeAllModals();
+  showToast(`Fusionné et supprimé ${merged} doublon${merged>1?"s":""}`);
+};
 window.dbToggleAll = function(checked) { const list = allPeople.filter(p => (dbFilterTier==="all"||p.tier===dbFilterTier)&&(dbFilterStage==="all"||p.stage===dbFilterStage)&&(dbFilterSource==="all"||p.source===dbFilterSource)); list.forEach(p => checked ? selectedPeople.add(p.id) : selectedPeople.delete(p.id)); renderDatabase(); };
 window.dbBulkTier = async function(tier) { if (!tier||!selectedPeople.size) return; if (!confirm(`Changer le tier de ${selectedPeople.size} contact(s)?`)) return; for (const id of selectedPeople) { await updateDoc(doc(db,"people",id),{tier,updatedAt:serverTimestamp()}); } selectedPeople.clear(); showToast("Tier mis à jour ✓"); };
 window.dbBulkStage = async function(stage) { if (!stage||!selectedPeople.size) return; if (!confirm(`Changer l'étape de ${selectedPeople.size} contact(s)?`)) return; for (const id of selectedPeople) { await updateDoc(doc(db,"people",id),{stage,updatedAt:serverTimestamp()}); } selectedPeople.clear(); showToast("Étape mise à jour ✓"); };
