@@ -571,6 +571,7 @@ body {
   justify-content: flex-end;
   padding: 0;
   backdrop-filter: blur(2px);
+  overflow-y: auto;
 }
 
 .modal-overlay.open {
