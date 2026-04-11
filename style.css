@@ -743,7 +743,7 @@ body {
 
 .visit-entry {
   display: grid;
-  grid-template-columns: 1fr 80px 80px 32px;
+  grid-template-columns: 1fr auto 80px 80px 32px;
   gap: 6px;
   align-items: center;
   margin-bottom: 8px;
