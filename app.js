@@ -1578,7 +1578,7 @@ function renderTargetsView() {
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
         ${mapsAddr?`<a href="https://www.google.com/maps/search/${encodeURIComponent(mapsAddr)}" target="_blank" style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--accent-light);color:var(--accent);text-decoration:none;white-space:nowrap;">📍 Maps</a>`:""}
-        <button onclick="removeTarget('${p.id}')" style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--red-bg);color:var(--red);border:none;cursor:pointer;font-family:var(--font);white-space:nowrap;">📝 Update</button>
+<button onclick="targetToggleUpdate('${p.id}')" style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-family:var(--font);white-space:nowrap;">📝 Update</button>
         <button onclick="removeTarget('${p.id}')" style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--red-bg);color:var(--red);border:none;cursor:pointer;font-family:var(--font);white-space:nowrap;">✕ Remove</button>
 </div>
     </div>
