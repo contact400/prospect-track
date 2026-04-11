@@ -521,6 +521,74 @@ window.dbSetSearch = function(val) { dbSearchQuery = val; renderDatabase(); cons
 window.dbSetFilterTier = function(val) { dbFilterTier = val; renderDatabase(); };
 window.dbSetFilterStage = function(val) { dbFilterStage = val; renderDatabase(); };
 window.dbSetFilterSource = function(val) { dbFilterSource = val; renderDatabase(); };
+window.openFubImport = function() {
+  document.getElementById("opsModalContent").innerHTML = `<div class="modal-header"><div><div class="modal-title">Importer depuis FUB</div></div><button class="close-x" onclick="closeAllModals()">×</button></div><div class="mbody-ops" style="padding:1rem;"><div style="background:var(--accent-light);border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:13px;color:var(--accent);line-height:1.6;">Exportez vos contacts depuis Follow Up Boss (People → Export), puis uploadez le fichier CSV ici.</div><div class="form-group"><label>Fichier CSV (export FUB)</label><input type="file" id="fubCsvInput" accept=".csv" onchange="fubPreviewCSV(this)" style="padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);width:100%;"></div><div id="fubPreview" style="display:none;margin-top:12px;"><div style="font-size:12px;font-weight:500;color:var(--text-2);margin-bottom:8px;" id="fubPreviewLabel"></div><div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);" id="fubPreviewList"></div></div></div><div class="modal-actions"><button class="btn-secondary" onclick="closeAllModals()">Annuler</button><button class="btn-primary" id="fubImportBtn" style="width:auto;padding:9px 20px;display:none;" onclick="runFubImport()">Importer tout</button></div>`;
+  openModal("opsModal");
+};
+
+let _fubRows = []; let _fubHeaders = [];
+window.fubPreviewCSV = function(input) {
+  const file = input.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const rows = parseCSV(e.target.result);
+      if (rows.length < 2) { showToast("CSV vide"); return; }
+      _fubHeaders = rows[0].map(h => h.trim().toLowerCase());
+      _fubRows = rows.slice(1).filter(r => r.some(c => c.trim()));
+      const get = (row, col) => { const i = _fubHeaders.indexOf(col); return i >= 0 ? (row[i]||"").trim() : ""; };
+      const preview = _fubRows.map(row => {
+        const name = `${get(row,"first name")} ${get(row,"last name")}`.trim();
+        return `<div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:8px;align-items:center;"><span style="font-weight:500;flex:1;">${name||"Sans nom"}</span><span style="font-size:11px;color:var(--text-3);">${get(row,"lead source")}</span><span style="font-size:11px;color:var(--text-3);">${get(row,"stage")}</span></div>`;
+      }).join("");
+      document.getElementById("fubPreviewLabel").textContent = `${_fubRows.length} contact(s) prêts à importer`;
+      document.getElementById("fubPreviewList").innerHTML = preview;
+      document.getElementById("fubPreview").style.display = "block";
+      document.getElementById("fubImportBtn").style.display = "";
+    } catch(err) { showToast("Erreur: " + err.message); }
+  };
+  reader.readAsText(file);
+};
+
+window.runFubImport = async function() {
+  const btn = document.getElementById("fubImportBtn"); btn.textContent = "Importation..."; btn.disabled = true;
+  const get = (row, col) => { const i = _fubHeaders.indexOf(col); return i >= 0 ? (row[i]||"").trim() : ""; };
+  const stageMap = {"hot prospect":"Lead","lead":"Lead","nurture":"Nurturing","active buyer":"Client","active seller":"Client","closed":"Past client","past client":"Past client","past client (bought)":"Past client","past client (sold)":"Past client"};
+  const sourceMap = {"expiré - unifamiliale":"Door knock","expiré - condo":"Door knock","annulé - unifamiliale":"Door knock","expired":"Door knock","referral":"Referral","open house":"Open house","realtor.ca":"Inbound","centris.ca":"Inbound","paid search":"Paid Meta ad","facebook":"Paid Meta ad","direct":"Inbound","mailer":"Mailer"};
+  let imported = 0; let failed = 0;
+  for (const row of _fubRows) {
+    try {
+      const firstName = get(row,"first name"); const lastName = get(row,"last name");
+      if (!firstName && !lastName) { failed++; continue; }
+      const tags = get(row,"tags").toLowerCase();
+      let tier = "c";
+      if (tags.includes("vip")) tier = "vip";
+      else if (tags.includes("a-client")||tags.includes("a client")) tier = "a";
+      else if (tags.includes("b-client")||tags.includes("b client")) tier = "b";
+      const rawStage = get(row,"stage").toLowerCase();
+      const rawSource = get(row,"lead source").toLowerCase();
+      const notes = [get(row,"notes"), get(row,"description")].filter(Boolean).join("\n\n");
+      const data = {
+        firstName, lastName,
+        phone: get(row,"phone 1"),
+        email: get(row,"email 1"),
+        stage: stageMap[rawStage]||"Lead",
+        source: sourceMap[rawSource]||"Other",
+        assignedAgent: get(row,"assigned to").split(" ")[0]||"Karim",
+        neighborhood: get(row,"address 1 - city")||get(row,"property city"),
+        birthday: get(row,"birthday"),
+        language: get(row,"language"),
+        notes, tier,
+        timeline:[{id:"l"+Date.now()+Math.random(),text:"Importé depuis FUB",type:"note",date:new Date().toISOString().slice(0,10),by:"Import"}],
+        createdAt:serverTimestamp(), createdBy:currentUser.uid, updatedAt:serverTimestamp()
+      };
+      await addDoc(collection(db,"people"),data);
+      imported++;
+    } catch(e) { failed++; }
+  }
+  closeAllModals();
+  showToast(`Importé ${imported} contact(s)${failed?` · ${failed} échoués`:""}`);
+};
 window.switchView = function(name, el) {
   document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
   document.querySelectorAll(".nav-item").forEach(n=>n.classList.remove("active"));
