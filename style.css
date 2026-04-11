@@ -1347,3 +1347,47 @@ body {
   .ops-tabs { overflow-x: auto !important; }
   .ops-inner-tabs { overflow-x: auto !important; }
 }
+/* ── Database / People ─────────────────────────────────── */
+.db-filter-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;}
+.db-search{flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;font-family:var(--font);background:var(--surface);color:var(--text);}
+.db-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;}
+.db-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;cursor:pointer;transition:border-color 0.15s;}
+.db-card:hover{border-color:var(--accent);}
+.db-card-top{display:flex;align-items:flex-start;gap:12px;margin-bottom:10px;}
+.db-avatar{width:40px;height:40px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;flex-shrink:0;}
+.db-name{font-size:14px;font-weight:600;color:var(--text);margin-bottom:2px;}
+.db-meta{font-size:12px;color:var(--text-3);}
+.db-badges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+.db-tier-vip{background:#FDF3E7;color:#7A4F1D;border:1px solid #E9A000;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;}
+.db-tier-a{background:#E6F1FB;color:#0C447C;border:1px solid #185FA5;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;}
+.db-tier-b{background:#E1F5EE;color:#085041;border:1px solid #1D9E75;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;}
+.db-tier-c{background:var(--bg);color:var(--text-3);border:1px solid var(--border);padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;}
+.db-stage{padding:2px 8px;border-radius:99px;font-size:11px;font-weight:500;}
+.db-followup-overdue{color:#C41230;font-size:11px;font-weight:500;}
+.db-card-footer{display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border);padding-top:8px;margin-top:4px;}
+
+/* Person modal */
+.pm-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:16px;}
+.pm-tab{padding:8px 16px;font-size:13px;font-family:var(--font);border:none;background:none;cursor:pointer;color:var(--text-2);border-bottom:2px solid transparent;margin-bottom:-1px;}
+.pm-tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:500;}
+.pm-section{margin-bottom:16px;}
+.pm-section-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);margin-bottom:8px;}
+.pm-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.pm-field{display:flex;flex-direction:column;gap:4px;}
+.pm-field label{font-size:11px;color:var(--text-3);}
+.pm-field input,.pm-field select,.pm-field textarea{padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;font-family:var(--font);background:var(--surface);color:var(--text);}
+
+/* Timeline */
+.tl-entry{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);}
+.tl-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex-shrink:0;margin-top:5px;}
+.tl-dot-transaction{background:#1D9E75;}
+.tl-dot-note{background:#378ADD;}
+.tl-content{flex:1;}
+.tl-text{font-size:13px;color:var(--text);}
+.tl-time{font-size:11px;color:var(--text-3);margin-top:2px;}
+
+/* Tier overdue dashboard widget */
+.db-overdue-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);}
+.db-overdue-tier{font-size:11px;font-weight:600;width:60px;}
+.db-overdue-name{flex:1;font-size:13px;}
+.db-overdue-days{font-size:12px;font-weight:500;color:#C41230;}
