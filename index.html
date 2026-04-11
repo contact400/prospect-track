@@ -51,7 +51,9 @@
         </a>
         <a href="#" class="nav-item" data-view="ops" id="opsNav" onclick="switchView('ops',this)" style="display:none;">
           <span class="nav-icon">◩</span> BACHA Ops
-        </a>
+        </a><a href="#" class="nav-item" data-view="database" id="databaseNav" onclick="switchView('database',this)">
+  <span class="nav-icon">👥</span> Database
+</a>
         <a href="#" class="nav-item" data-view="dashboard" id="dashNav" onclick="switchView('dashboard',this)" style="display:none;">
           <span class="nav-icon">◉</span> Dashboard
         </a>
@@ -77,6 +79,7 @@
         <a href="#" class="nav-item" data-view="targets" onclick="switchView('targets',this);closeMobileNav()">🎯 <span id="targetsNavLabelMobile">Today's Targets</span></a>
         <a href="#" class="nav-item" data-view="performance" onclick="switchView('performance',this);closeMobileNav()">📈 My Performance</a>
         <a href="#" class="nav-item" data-view="ops" id="opsNavMobile" onclick="switchView('ops',this);closeMobileNav()" style="display:none;">◩ BACHA Ops</a>
+        <a href="#" class="nav-item" data-view="database" id="databaseNavMobile" onclick="switchView('database',this);closeMobileNav()">👥 Database</a>
         <a href="#" class="nav-item" data-view="dashboard" id="dashNavMobile" onclick="switchView('dashboard',this);closeMobileNav()" style="display:none;">◉ Dashboard</a>
         <a href="#" class="nav-item" data-view="admin" id="adminNavMobile" onclick="switchView('admin',this);closeMobileNav()" style="display:none;">◎ Admin</a>
         <hr style="border-color:rgba(255,255,255,0.1);margin:12px 0;" />
@@ -141,6 +144,18 @@
         </div>
         <div id="opsContent"></div>
       </div>
+      <div id="view-database" class="view">
+  <div class="view-header">
+    <div>
+      <h1 class="view-title">Database</h1>
+      <div id="databaseCount" class="view-subtitle"></div>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn-primary" id="addPersonBtn" onclick="openAddPerson()">+ Add contact</button>
+    </div>
+  </div>
+  <div id="databaseContent"></div>
+</div>
 
       <div id="view-dashboard" class="view">
         <div class="view-header">
