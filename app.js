@@ -851,6 +851,8 @@ window.opsOpenNewPurchase = function(editId) {
   const existing = editId ? opsPurchases.find(x=>x.id===editId) : null;
   const g = f => existing?.[f]||"";
   const gc = f => existing?.conditions?.[f]||"";
+  const now = new Date();
+  const todayLocal = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
   document.getElementById("opsModalContent").innerHTML = `
     <div class="modal-header">
       <div><div class="modal-title">${existing?"Modifier l'achat":"Nouvel achat"}</div></div>
@@ -878,6 +880,14 @@ window.opsOpenNewPurchase = function(editId) {
       </div>
 
       <div class="ops-offer-section-title" style="margin-top:1.25rem;">Conditions</div>
+      <div style="background:#F0F4FF;border:1px solid #C7D4F0;border-radius:10px;padding:14px 16px;margin-bottom:14px;">
+        <div style="font-size:12px;font-weight:600;color:#3A4A6B;margin-bottom:4px;">⚠ Date d'acceptation réelle</div>
+        <div style="font-size:12px;color:#5A6A8B;line-height:1.5;">Les délais des conditions seront calculés à partir de cette date. Entrez la date à laquelle l'offre a <strong>réellement</strong> été acceptée par le vendeur.</div>
+      </div>
+      <div class="form-group">
+        <label>Date d'acceptation de l'offre</label>
+        <input type="date" id="om-accepted-date" value="${g("acceptedAt")||todayLocal}" max="${todayLocal}" style="font-size:15px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;" />
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
         <div class="form-group"><label>Inspection (jours)</label><input type="number" id="om-insp" placeholder="ex: 10" min="0" value="${gc("inspection")}"></div>
         <div class="form-group"><label>Financement (jours)</label><input type="number" id="om-fin" placeholder="ex: 15" min="0" value="${gc("financing")}"></div>
@@ -941,9 +951,10 @@ window.opsSavePurchase = async function(editId) {
     docList: g("om-doclist"), otherDetails: g("om-otherdet"),
   };
 
-  // Calculate deadlines from today
-  const base = new Date();
-  const localBase = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  // Calculate deadlines from the real acceptance date entered by the user
+  const acceptedAt = g("om-accepted-date") || (() => { const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`; })();
+  const [_y,_m,_d] = acceptedAt.split("-").map(Number);
+  const localBase = new Date(_y, _m - 1, _d);
   const addDays = n => { const d=new Date(localBase); d.setDate(d.getDate()+n); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
   const deadlines = {};
   if (conditions.inspection) deadlines.inspection = addDays(parseInt(conditions.inspection));
@@ -964,7 +975,7 @@ window.opsSavePurchase = async function(editId) {
     price: fmtPrice, agent: g("om-agent"),
     validityDate: vDate, validityTime: vTime, validity: validityDisplay,
     conditions: [...autoConds, ...existing],
-    offerConditions: conditions, deadlines,
+    offerConditions: conditions, deadlines, acceptedAt,
     notaryDate: g("om-notary"), occupancyDate: g("om-occupancy"),
     rent: g("om-rent"), rentDetails: g("om-rentdet"),
     inclusions: g("om-incl"), exclusions: g("om-excl"),
@@ -980,7 +991,7 @@ window.opsSavePurchase = async function(editId) {
     opsActivePid=ref.id;
   }
   closeAllModals(); opsView="purchases";
-  showToast(editId?"Achat mis à jour ✓":"Achat enregistré ✓");
+  showToast(editId?"Achat mis à jour ✓":"Achat enregistré — délais calculés depuis le "+acceptedAt+" ✓");
 };
 
 window.opsToggleTask = async function(lid, tid) {
