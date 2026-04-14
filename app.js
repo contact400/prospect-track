@@ -18,6 +18,7 @@ let unsubscribeProspects = null;
 let unsubscribeTargets = null;
 let unsubscribeOpsListings = null;
 let unsubscribeOpsPurchases = null;
+let unsubscribeOpsBuyers = null;
 let todaysTargets = [];
 let activeFilters = { sort: "newest", mailing: "all", visit: "all", eval: "all", type: "all" };
 let selectedMunicipalities = new Set();
@@ -26,7 +27,8 @@ let dupReviewMode = false;
 // ── Ops state ──────────────────────────────────────────────
 let opsListings = [];
 let opsPurchases = [];
-let opsView = "dash"; // "dash" | "listings" | "purchases"
+let opsBuyers = [];
+let opsView = "dash"; // "dash" | "listings" | "purchases" | "buyers" | "ventes"
 let opsActiveLid = null;
 let opsActivePid = null;
 let opsListingView = "checklist";
@@ -450,6 +452,7 @@ window.handleLogout = async function() {
   if (unsubscribeTargets) unsubscribeTargets();
   if (unsubscribeOpsListings) unsubscribeOpsListings();
   if (unsubscribeOpsPurchases) unsubscribeOpsPurchases();
+  if (unsubscribeOpsBuyers) unsubscribeOpsBuyers();
   await signOut(auth);
 };
 function showLogin() {
@@ -800,6 +803,11 @@ function subscribeToOps() {
       if (opsView==="listings" && opsListingView==="checklist" && onlyPDataChanged) return;
       renderOps();
     }
+  });
+  const bq = query(collection(db,"ops_buyers"), orderBy("createdAt","desc"));
+  unsubscribeOpsBuyers = onSnapshot(bq, snap => {
+    opsBuyers = snap.docs.map(d=>({id:d.id,...d.data()})).filter(opsCanAccess);
+    if (document.getElementById("view-ops")?.classList.contains("active")) renderOps();
   });
 }
 
@@ -1517,16 +1525,19 @@ function renderOps() {
       <button class="ops-tab${opsView==="dash"?" active":""}" onclick="opsSetView('dash')">Vue d'ensemble</button>
       <button class="ops-tab${opsView==="listings"?" active":""}" onclick="opsSetView('listings')">Inscriptions <span class="ops-tab-count">${opsListings.filter(l=>!["ferme","vendu"].includes(l.status)).length}</span></button>
       <button class="ops-tab${opsView==="purchases"?" active":""}" onclick="opsSetView('purchases')">Achats <span class="ops-tab-count">${opsPurchases.filter(p=>!OPS_PURCHASE_SOLD.includes(p.status||"active")).length}</span></button>
+      <button class="ops-tab${opsView==="buyers"?" active":""}" onclick="opsSetView('buyers')">Acheteurs actifs <span class="ops-tab-count">${opsBuyers.length}</span></button>
       <button class="ops-tab${opsView==="ventes"?" active":""}" onclick="opsSetView('ventes')">Ventes <span class="ops-tab-count">${opsListings.filter(l=>["ferme","vendu"].includes(l.status)).length + opsPurchases.filter(p=>OPS_PURCHASE_SOLD.includes(p.status||"active")).length}</span></button>
     </div>`;
 
   ha.innerHTML = `
+    <button class="btn-secondary" onclick="opsOpenNewBuyer()">+ Nouvel acheteur</button>
     <button class="btn-secondary" onclick="opsOpenNewPurchase()">+ Nouvel achat</button>
     <button class="btn-primary" onclick="opsOpenNewListing()">+ Nouvelle inscription</button>`;
 
   if (opsView==="dash") { el.innerHTML = tabs + opsRenderDash(); return; }
   if (opsView==="listings") { el.innerHTML = tabs + opsRenderListings(); return; }
   if (opsView==="purchases") { el.innerHTML = tabs + opsRenderPurchases(); return; }
+  if (opsView==="buyers") { el.innerHTML = tabs + opsRenderBuyers(); return; }
   if (opsView==="ventes") { el.innerHTML = tabs + opsRenderVentes(); return; }
 }
 
@@ -1552,11 +1563,12 @@ function opsRenderDash() {
   const nbVendu = ventesL.length + ventesP.length;
 
   return `
-  <div class="ops-kpi-grid" style="grid-template-columns:repeat(5,minmax(0,1fr));">
+  <div class="ops-kpi-grid" style="grid-template-columns:repeat(6,minmax(0,1fr));">
     <div class="ops-kpi" style="border-left-color:#0C2B5E"><div class="ops-kpi-l">Dossiers actifs</div><div class="ops-kpi-v">${activeL.length+activeP.length}</div><div class="ops-kpi-s">inscriptions + achats</div></div>
     <div class="ops-kpi" style="border-left-color:#378ADD"><div class="ops-kpi-l">Volume immobilier</div><div class="ops-kpi-v">${opsFmtPx(vol)}</div><div class="ops-kpi-s">valeur totale des dossiers</div></div>
     <div class="ops-kpi" style="border-left-color:#1D9E75"><div class="ops-kpi-l">Commission estimée</div><div class="ops-kpi-v">${opsFmtPx(comm)}</div><div class="ops-kpi-s">2% du volume</div></div>
     <div class="ops-kpi" style="border-left-color:${urgCount>0?"#E24B4A":"#888780"}"><div class="ops-kpi-l">Conditions urgentes</div><div class="ops-kpi-v" style="color:${urgCount>0?"#E24B4A":"var(--text)"}">${urgCount}</div><div class="ops-kpi-s">délai ≤ 3 jours</div></div>
+    <div class="ops-kpi" style="border-left-color:#9B59B6;cursor:pointer;" onclick="opsSetView('buyers')"><div class="ops-kpi-l">Acheteurs actifs</div><div class="ops-kpi-v">${opsBuyers.length}</div><div class="ops-kpi-s">${opsFmtPx(opsBuyers.reduce((s,b)=>s+opsParsePx(b.budget),0))} budget total</div></div>
     <div class="ops-kpi" style="border-left-color:#534AB7;background:#F4F3FF;"><div class="ops-kpi-l" style="color:#534AB7;">Volume d'affaire vendu</div><div class="ops-kpi-v" style="color:#534AB7;">${opsFmtPx(volVendu)}</div><div class="ops-kpi-s" style="color:#534AB7;">${nbVendu} dossier${nbVendu!==1?"s":""} · comm. ${opsFmtPx(commVendu)}</div></div>
   </div>
   <div class="ops-two-col">
@@ -1902,6 +1914,214 @@ window.opsGeneratePurchasePDFLang = function(pid, lang) {
   setTimeout(()=>win.print(),600);
 };
 
+
+
+// ── Buyers CRUD & Render ───────────────────────────────────
+
+const OPS_BUYER_STAGES = [
+  {id:"prequalified", label:"Pré-qualifié",        color:"#185FA5"},
+  {id:"searching",    label:"Recherche active",     color:"#1D9E75"},
+  {id:"offer_prep",   label:"Offre en préparation", color:"#9B59B6"},
+];
+
+function opsBuyerStage(id) {
+  return OPS_BUYER_STAGES.find(s=>s.id===id) || OPS_BUYER_STAGES[0];
+}
+
+window.opsOpenNewBuyer = function(editId) {
+  const existing = editId ? opsBuyers.find(x=>x.id===editId) : null;
+  const g = f => existing?.[f]||"";
+  const now = new Date();
+  const todayLocal = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+  const agents = allUsers.length ? allUsers : [{uid:currentUser.uid,name:currentUserProfile?.name||"Karim"}];
+
+  document.getElementById("opsModalContent").innerHTML = `
+    <div class="modal-header">
+      <div><div class="modal-title">${existing?"Modifier l'acheteur":"Nouvel acheteur actif"}</div></div>
+      <button class="close-x" onclick="closeAllModals()">×</button>
+    </div>
+    <div class="mbody-ops" style="max-height:65vh;overflow-y:auto;padding-right:4px;">
+
+      <div class="ops-offer-section-title">Identification</div>
+      <div class="form-group"><label>Nom de l'acheteur</label><input type="text" id="ob-name" placeholder="ex: Jean Tremblay" value="${g("name")}"></div>
+      <div class="form-group"><label>Courtier BACHA responsable</label>
+        <select id="ob-agent">
+          ${agents.map(u=>`<option value="${u.name||u.email}" ${g("agent")===(u.name||u.email)?"selected":""}>${u.name||u.email}</option>`).join("")}
+        </select>
+      </div>
+      <div class="form-group"><label>Étape</label>
+        <select id="ob-stage">
+          ${OPS_BUYER_STAGES.map(s=>`<option value="${s.id}" ${g("stage")===s.id?"selected":""}>${s.label}</option>`).join("")}
+        </select>
+      </div>
+
+      <div class="ops-offer-section-title" style="margin-top:1.25rem;">Budget & propriété</div>
+      <div class="form-group"><label>Budget maximum ($)</label><input type="text" id="ob-budget" placeholder="ex: 650 000 $" value="${g("budget")}" style="font-size:15px;font-weight:500;"></div>
+      <div class="form-group"><label>Type de propriété</label>
+        <select id="ob-type">
+          <option value="" ${!g("propType")?"selected":""}>— Sélectionner —</option>
+          <option value="Condo" ${g("propType")==="Condo"?"selected":""}>Condo</option>
+          <option value="Maison" ${g("propType")==="Maison"?"selected":""}>Maison</option>
+          <option value="Duplex" ${g("propType")==="Duplex"?"selected":""}>Duplex</option>
+          <option value="Multiplex" ${g("propType")==="Multiplex"?"selected":""}>Multiplex</option>
+          <option value="Tout" ${g("propType")==="Tout"?"selected":""}>Tout</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Quartiers / secteurs ciblés</label><input type="text" id="ob-areas" placeholder="ex: Laval, Ahuntsic, Saint-Laurent" value="${g("areas")}"></div>
+
+      <div class="ops-offer-section-title" style="margin-top:1.25rem;">Pré-approbation</div>
+      <div class="form-group"><label>Date d'expiration de la pré-approbation</label><input type="date" id="ob-preapproval" value="${g("preapprovalExpiry")}"></div>
+
+      <div class="ops-offer-section-title" style="margin-top:1.25rem;">Notes</div>
+      <div class="form-group"><textarea id="ob-notes" rows="3" placeholder="Notes sur l'acheteur, ses critères, ses contraintes..." style="width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--border);font-family:var(--font);resize:vertical;">${g("notes")}</textarea></div>
+
+      ${isAdmin ? `<div class="ops-offer-section-title" style="margin-top:1.25rem;">Accès agents</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          ${agents.map(u=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" value="${u.uid}" class="ops-assign-cb" ${!existing||((existing.assignedTo||[]).includes(u.uid))?"checked":""}> ${u.name||u.email}</label>`).join("")}
+        </div>` : ""}
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeAllModals()">Annuler</button>
+      <button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="opsSaveBuyer('${editId||""}')">Enregistrer</button>
+    </div>`;
+  openModal("opsModal");
+};
+
+window.opsSaveBuyer = async function(editId) {
+  const g = id => document.getElementById(id)?.value?.trim()||"";
+  const name = g("ob-name");
+  if (!name) { showToast("Nom de l'acheteur requis"); return; }
+
+  const rawBudget = g("ob-budget").replace(/[^0-9]/g,"");
+  const fmtBudget = rawBudget ? Number(rawBudget).toLocaleString("fr-CA")+" $" : g("ob-budget");
+
+  const assignedTo = isAdmin
+    ? [...document.querySelectorAll(".ops-assign-cb:checked")].map(cb=>cb.value)
+    : [currentUser.uid];
+
+  const data = {
+    name, agent: g("ob-agent"),
+    stage: g("ob-stage") || "prequalified",
+    budget: fmtBudget,
+    propType: g("ob-type"),
+    areas: g("ob-areas"),
+    preapprovalExpiry: g("ob-preapproval"),
+    notes: g("ob-notes"),
+    assignedTo,
+    updatedAt: serverTimestamp()
+  };
+
+  if (editId) {
+    await updateDoc(doc(db,"ops_buyers",editId), data);
+    showToast("Acheteur mis à jour ✓");
+  } else {
+    data.createdAt = serverTimestamp();
+    data.createdBy = currentUser.uid;
+    await addDoc(collection(db,"ops_buyers"), data);
+    showToast("Acheteur enregistré ✓");
+  }
+  closeAllModals();
+  opsView = "buyers";
+};
+
+window.opsDeleteBuyer = async function(id) {
+  if (!confirm("Supprimer cet acheteur?")) return;
+  await deleteDoc(doc(db,"ops_buyers",id));
+  showToast("Acheteur supprimé");
+};
+
+window.opsCycleBuyerStage = async function(id) {
+  const b = opsBuyers.find(x=>x.id===id);
+  if (!b) return;
+  const idx = OPS_BUYER_STAGES.findIndex(s=>s.id===(b.stage||"prequalified"));
+  const next = OPS_BUYER_STAGES[(idx+1) % OPS_BUYER_STAGES.length];
+  await updateDoc(doc(db,"ops_buyers",id),{stage:next.id, updatedAt:serverTimestamp()});
+  showToast("Étape : "+next.label);
+};
+
+window.opsConvertBuyerToAchat = function(id) {
+  const b = opsBuyers.find(x=>x.id===id);
+  if (!b) return;
+  // Pre-fill the Nouvel achat form with buyer data then open it
+  opsOpenNewPurchase();
+  // After modal renders, fill in the fields
+  setTimeout(() => {
+    const setVal = (elId, val) => { const el = document.getElementById(elId); if (el && val) el.value = val; };
+    setVal("om-buyer", b.name);
+    setVal("om-agent", b.agent);
+    const rawBudget = (b.budget||"").replace(/[^0-9]/g,"");
+    if (rawBudget) setVal("om-price", Number(rawBudget).toLocaleString("fr-CA")+" $");
+  }, 80);
+};
+
+function opsRenderBuyers() {
+  if (!opsBuyers.length) return `
+    <div class="empty-state">
+      <div class="empty-icon">👤</div>
+      <div class="empty-title">Aucun acheteur actif</div>
+      <div class="empty-sub">Ajoutez vos acheteurs actifs pour suivre leur progression avant l'acceptation d'une offre.</div>
+      <button class="btn-primary" style="margin-top:1rem;" onclick="opsOpenNewBuyer()">+ Nouvel acheteur</button>
+    </div>`;
+
+  const now = new Date();
+  const todayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+  const cards = opsBuyers.map(b => {
+    const stage = opsBuyerStage(b.stage||"prequalified");
+    const rawBudget = opsParsePx(b.budget);
+    const comm = rawBudget ? rawBudget * 0.02 : 0;
+
+    // Pre-approval warning
+    let preapprovalBadge = "";
+    if (b.preapprovalExpiry) {
+      const [ey,em,ed] = b.preapprovalExpiry.split("-").map(Number);
+      const expMs = new Date(ey, em-1, ed).getTime();
+      const daysLeft = Math.round((expMs - todayMs) / 86400000);
+      if (daysLeft < 0) {
+        preapprovalBadge = `<span style="background:#FDECEA;color:#C0392B;border:1px solid #F5C6C6;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:600;">⚠ Pré-approbation expirée</span>`;
+      } else if (daysLeft <= 30) {
+        preapprovalBadge = `<span style="background:#FEF3C7;color:#B7791F;border:1px solid #F6D860;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:600;">⚠ Expire dans ${daysLeft}j</span>`;
+      } else {
+        preapprovalBadge = `<span style="background:#D1FAE5;color:#1A7A4A;border:1px solid #6EE7B7;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:600;">Pré-approbation valide · ${opsFmtDate(b.preapprovalExpiry)}</span>`;
+      }
+    }
+
+    return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px 24px;margin-bottom:12px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px;">
+            <div style="font-size:16px;font-weight:600;color:var(--text);">${b.name}</div>
+            <button onclick="opsCycleBuyerStage('${b.id}')" style="background:${stage.color}18;color:${stage.color};border:1px solid ${stage.color}40;border-radius:20px;padding:3px 12px;font-size:11px;font-weight:600;cursor:pointer;" title="Cliquer pour changer l'étape">${stage.label} ↻</button>
+            ${preapprovalBadge}
+          </div>
+          <div style="font-size:12px;color:var(--text-3);margin-bottom:10px;">${[b.agent, b.propType, b.areas].filter(Boolean).join(" · ")}</div>
+          ${b.notes ? `<div style="font-size:12px;color:var(--text-2);background:var(--bg);border-radius:6px;padding:8px 12px;margin-bottom:10px;line-height:1.5;">${b.notes}</div>` : ""}
+        </div>
+        <div style="text-align:right;flex-shrink:0;">
+          <div style="font-size:20px;font-weight:700;color:var(--text);">${opsFmtPx(rawBudget)}</div>
+          <div style="font-size:12px;color:var(--text-3);">comm. estimée ${opsFmtPx(comm)}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:14px;margin-top:4px;">
+        <button class="ops-offer-btn ops-offer-btn-green" onclick="opsConvertBuyerToAchat('${b.id}')">→ Convertir en achat</button>
+        <button class="ops-offer-btn" onclick="opsOpenNewBuyer('${b.id}')">Modifier</button>
+        <button class="ops-offer-btn ops-offer-btn-red" onclick="opsDeleteBuyer('${b.id}')">Supprimer</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  const totalBudget = opsBuyers.reduce((s,b)=>s+opsParsePx(b.budget),0);
+  const totalComm = totalBudget * 0.02;
+
+  return `
+  <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
+    <div class="ops-kpi" style="border-left-color:#9B59B6;flex:1;min-width:140px;"><div class="ops-kpi-l">Acheteurs actifs</div><div class="ops-kpi-v">${opsBuyers.length}</div><div class="ops-kpi-s">leads sans offre acceptée</div></div>
+    <div class="ops-kpi" style="border-left-color:#378ADD;flex:1;min-width:140px;"><div class="ops-kpi-l">Budget total</div><div class="ops-kpi-v">${opsFmtPx(totalBudget)}</div><div class="ops-kpi-s">somme des budgets max</div></div>
+    <div class="ops-kpi" style="border-left-color:#1D9E75;flex:1;min-width:140px;"><div class="ops-kpi-l">Commission potentielle</div><div class="ops-kpi-v">${opsFmtPx(totalComm)}</div><div class="ops-kpi-s">2% du budget total</div></div>
+  </div>
+  ${cards}`;
+}
 
 function opsRenderVentes() {
   const ventesL = opsListings.filter(l=>["ferme","vendu"].includes(l.status));
