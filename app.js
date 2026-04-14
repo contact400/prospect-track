@@ -1933,7 +1933,9 @@ window.opsOpenNewBuyer = function(editId) {
   const g = f => existing?.[f]||"";
   const now = new Date();
   const todayLocal = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
-  const agents = allUsers.length ? allUsers : [{uid:currentUser.uid,name:currentUserProfile?.name||"Karim"}];
+  // Filter out any users with no usable display name or email to avoid "undefined" rendering
+  const agents = (allUsers.length ? allUsers : [{uid:currentUser.uid,name:currentUserProfile?.name||"Karim"}])
+    .filter(u => u.name||u.email);
 
   document.getElementById("opsModalContent").innerHTML = `
     <div class="modal-header">
@@ -1946,7 +1948,7 @@ window.opsOpenNewBuyer = function(editId) {
       <div class="form-group"><label>Nom de l'acheteur</label><input type="text" id="ob-name" placeholder="ex: Jean Tremblay" value="${g("name")}"></div>
       <div class="form-group"><label>Courtier BACHA responsable</label>
         <select id="ob-agent">
-          ${agents.map(u=>`<option value="${u.name||u.email}" ${g("agent")===(u.name||u.email)?"selected":""}>${u.name||u.email}</option>`).join("")}
+          ${agents.map(u=>{const label=u.name||u.email||"";return`<option value="${label}" ${g("agent")===label?"selected":""}>${label}</option>`;}).join("")}
         </select>
       </div>
       <div class="form-group"><label>Étape</label>
@@ -1977,7 +1979,7 @@ window.opsOpenNewBuyer = function(editId) {
 
       ${isAdmin ? `<div class="ops-offer-section-title" style="margin-top:1.25rem;">Accès agents</div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;">
-          ${agents.map(u=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" value="${u.uid}" class="ops-assign-cb" ${!existing||((existing.assignedTo||[]).includes(u.uid))?"checked":""}> ${u.name||u.email}</label>`).join("")}
+          ${agents.map(u=>{const label=u.name||u.email||"";return`<label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" value="${u.uid}" class="ops-assign-cb" ${!existing||((existing.assignedTo||[]).includes(u.uid))?"checked":""}> ${label}</label>`;}).join("")}
         </div>` : ""}
     </div>
     <div class="modal-actions">
@@ -1988,6 +1990,7 @@ window.opsOpenNewBuyer = function(editId) {
 };
 
 window.opsSaveBuyer = async function(editId) {
+  try {
   const g = id => document.getElementById(id)?.value?.trim()||"";
   const name = g("ob-name");
   if (!name) { showToast("Nom de l'acheteur requis"); return; }
@@ -2022,6 +2025,7 @@ window.opsSaveBuyer = async function(editId) {
   }
   closeAllModals();
   opsView = "buyers";
+  } catch(err) { console.error("opsSaveBuyer error:", err); showToast("Erreur: "+err.message); }
 };
 
 window.opsDeleteBuyer = async function(id) {
