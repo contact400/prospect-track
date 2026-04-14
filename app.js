@@ -317,10 +317,106 @@ window.openPersonModal = function(id) {
       <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text);">Dossiers liés</div>
       ${dealsHtml}
     </div>`;
-  document.getElementById("opsModalContent").innerHTML = `<div style="display:flex;height:75vh;overflow:hidden;">${leftPanel}${centerPanel}${rightPanel}</div>`;
-const m = document.getElementById("opsModal");
-  m.style.width = "820px";
-  openModal("opsModal");
+  if (window.innerWidth <= 768) {
+    // ── Mobile: full-screen single-column layout ──
+    const rowItem = (label, value, color="var(--text)") =>
+      `<div class="db-person-mobile-row">
+        <span class="db-person-mobile-row-label">${label}</span>
+        <span class="db-person-mobile-row-value" style="color:${color};">${value||"—"}</span>
+      </div>`;
+    const mobileHtml = `<div class="db-person-mobile">
+      <div class="db-person-mobile-header">
+        <div class="db-person-mobile-header-top">
+          <button class="db-person-mobile-back" onclick="closeAllModals()">← Retour</button>
+          ${p ? `<button class="db-person-mobile-edit" onclick="dbOpenEdit('${p.id}')">✏ Modifier</button>` : ""}
+        </div>
+        <div class="db-person-mobile-avatar">${initials}</div>
+        <div class="db-person-mobile-name">${g("firstName")} ${g("lastName")}</div>
+        <div class="db-person-mobile-stage">${[g("stage"), g("source"), g("neighborhood")].filter(Boolean).join(" · ")||""}</div>
+        ${od ? `<div style="text-align:center;margin-top:4px;font-size:12px;color:#FFD580;">⚠ Suivi en retard</div>` : ""}
+        <div class="db-person-mobile-actions">
+          ${g("phone") ? `
+            <a href="tel:${g("phone")}" class="db-person-mobile-action-btn">
+              <div class="db-person-mobile-action-icon">📞</div>
+              <span class="db-person-mobile-action-label">Appeler</span>
+            </a>
+            <a href="sms:${g("phone")}" class="db-person-mobile-action-btn">
+              <div class="db-person-mobile-action-icon">💬</div>
+              <span class="db-person-mobile-action-label">Texto</span>
+            </a>` : ""}
+          ${g("email") ? `
+            <a href="mailto:${g("email")}" class="db-person-mobile-action-btn">
+              <div class="db-person-mobile-action-icon">✉️</div>
+              <span class="db-person-mobile-action-label">Courriel</span>
+            </a>` : ""}
+        </div>
+      </div>
+      <div class="db-person-mobile-body">
+        <div class="db-person-mobile-section">
+          <div class="db-person-mobile-section-title">Profil CRM</div>
+          ${rowItem("Tier", dbTierBadge(g("tier"))||"—")}
+          ${rowItem("Étape", dbStageBadge(g("stage"))||"—")}
+          ${rowItem("Source", g("source"))}
+          ${rowItem("Agent", g("assignedAgent"))}
+          ${rowItem("Dernier contact", g("lastContactDate"))}
+          ${rowItem("Prochain suivi", g("nextFollowUp"), p?.nextFollowUp&&new Date(p.nextFollowUp)<new Date()?"#C41230":"var(--text)")}
+        </div>
+        <div class="db-person-mobile-section">
+          <div class="db-person-mobile-section-title">Profil immobilier</div>
+          ${rowItem("Type", g("propertyType"))}
+          ${rowItem("Statut", g("ownerStatus"))}
+          ${rowItem("Intérêt", g("intent"))}
+          ${rowItem("Renouvellement", g("mortgageRenewal"))}
+          ${rowItem("Valeur estimée", g("propertyValue"))}
+        </div>
+        <div class="db-person-mobile-section">
+          <div class="db-person-mobile-section-title">Personnel</div>
+          ${rowItem("Langue", g("language"))}
+          ${rowItem("Anniversaire", g("birthday"))}
+          ${rowItem("Référé par", g("referredBy"))}
+          ${rowItem("Enfants (âges)", g("kidsAges"))}
+          ${rowItem("Emménagement", g("moveInAnniversary"))}
+        </div>
+        ${g("notes") ? `<div class="db-person-mobile-section">
+          <div class="db-person-mobile-section-title">Notes</div>
+          <div style="padding:12px 16px;font-size:13px;color:var(--text-2);line-height:1.6;">${g("notes")}</div>
+        </div>` : ""}
+        <div class="db-person-mobile-section">
+          <div class="db-person-mobile-section-title">Journal d'activité</div>
+          <div style="padding:12px 16px;">
+            <div id="pm-timeline">${p ? dbRenderTimeline(p) : `<div style="font-size:13px;color:var(--text-3);">Aucune activité.</div>`}</div>
+          </div>
+        </div>
+        ${allLinked.length ? `<div class="db-person-mobile-section">
+          <div class="db-person-mobile-section-title">Dossiers liés</div>
+          ${allLinked.map(l=>`<div style="padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;" onclick="closeAllModals();switchView('ops',null)">
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;color:${l._type==="inscription"?"#185FA5":"#1D9E75"};margin-bottom:3px;">${l._type}</div>
+            <div style="font-size:14px;font-weight:500;color:var(--text);">${l.addr||"—"}</div>
+            <div style="font-size:12px;color:var(--text-3);">${l.price||""}</div>
+          </div>`).join("")}
+        </div>` : ""}
+        <div style="height:80px;"></div>
+      </div>
+      <div class="db-person-mobile-log">
+        <input type="text" id="pm-log-text" placeholder="Ajouter une note..." />
+        <button onclick="dbAddLog('${p?.id||""}')">+ Ajouter</button>
+      </div>
+    </div>`;
+    document.getElementById("opsModalContent").innerHTML = mobileHtml;
+    const m = document.getElementById("opsModal");
+    m.style.width = "100vw";
+    m.style.maxHeight = "100vh";
+    m.style.borderRadius = "0";
+    openModal("opsModal");
+  } else {
+    // ── Desktop: original 3-panel layout ──
+    document.getElementById("opsModalContent").innerHTML = `<div style="display:flex;height:75vh;overflow:hidden;">${leftPanel}${centerPanel}${rightPanel}</div>`;
+    const m = document.getElementById("opsModal");
+    m.style.width = "820px";
+    m.style.maxHeight = "";
+    m.style.borderRadius = "";
+    openModal("opsModal");
+  }
 };
 
 window.dbOpenEdit = function(id) {
@@ -505,14 +601,31 @@ function setupRoleUI() {
   if (!list.length) { el.innerHTML = actionBar + filterBar + `<div class="empty-state"><div class="empty-icon">👥</div><div class="empty-title">Aucun contact trouvé</div><div class="empty-sub">Ajoutez votre premier contact ou ajustez les filtres.</div></div>`; return; }
   const allSelected = list.length > 0 && list.every(p => selectedPeople.has(p.id));
   const header = `<div style="display:grid;grid-template-columns:40px 2fr 1.2fr 1.2fr 1fr 1fr 1fr 1fr;gap:0;padding:8px 16px;border-bottom:1px solid var(--border);background:var(--bg);"><div style="display:flex;align-items:center;"><input type="checkbox" ${allSelected?"checked":""} onchange="dbToggleAll(this.checked)" style="width:16px;height:16px;cursor:pointer;"></div><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Nom</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Téléphone</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Courriel</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Tier</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Étape</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Dernière activité</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);">Agent</span></div>`;
+  const isMobile = window.innerWidth <= 768;
   const rows = list.map(p => {
     const initials = `${(p.firstName||"?")[0]}${(p.lastName||"")[0]||""}`.toUpperCase();
     const avatarBg = p.tier==="vip"?"#E9A000":p.tier==="a"?"#185FA5":p.tier==="b"?"#1D9E75":"#888780";
     const od = dbIsOverdue(p);
     const days = dbDaysSinceContact(p);
-    const lastActivity = p.lastContactDate ? `${days === 0 ? "Aujourd'hui" : days + "j"} · ${p.lastContactDate}` : "Jamais";
+    const lastActivity = p.lastContactDate ? `${days === 0 ? "Aujourd'hui" : days + "j"}` : "Jamais";
     const lastActivityColor = od ? "#C41230" : "var(--text-3)";
     const isSel = selectedPeople.has(p.id);
+
+    if (isMobile) {
+      return `<div class="db-mobile-card" onclick="openPersonModal('${p.id}')">
+        <div class="db-mobile-avatar" style="background:${avatarBg};">${initials}</div>
+        <div class="db-mobile-info">
+          <div class="db-mobile-name">${p.firstName||""} ${p.lastName||""}${od?` <span style="color:#C41230;font-size:11px;">⚠</span>`:""}</div>
+          <div class="db-mobile-sub">${[p.source, p.neighborhood, p.stage].filter(Boolean).join(" · ")||"—"}</div>
+        </div>
+        <div class="db-mobile-right">
+          ${dbTierBadge(p.tier)||""}
+          <span style="font-size:11px;color:${lastActivityColor};">${lastActivity}</span>
+        </div>
+        <div class="db-mobile-chevron">›</div>
+      </div>`;
+    }
+
     return `<div style="display:grid;grid-template-columns:40px 2fr 1.2fr 1.2fr 1fr 1fr 1fr 1fr;gap:0;padding:12px 16px;border-bottom:1px solid var(--border);background:${isSel?"var(--accent-light)":"var(--surface)"};transition:background 0.1s;" onmouseover="if(!${isSel})this.style.background='var(--bg)'" onmouseout="if(!${isSel})this.style.background='var(--surface)'">
       <div style="display:flex;align-items:center;" onclick="event.stopPropagation()"><input type="checkbox" ${isSel?"checked":""} onchange="dbToggleSelect('${p.id}',this.checked)" style="width:16px;height:16px;cursor:pointer;"></div>
       <div style="display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="openPersonModal('${p.id}')">
@@ -524,11 +637,16 @@ function setupRoleUI() {
       <div style="font-size:13px;color:var(--text-2);align-self:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;" onclick="openPersonModal('${p.id}')">${p.email||"—"}</div>
       <div style="align-self:center;cursor:pointer;" onclick="openPersonModal('${p.id}')">${dbTierBadge(p.tier)||`<span style="color:var(--text-3);font-size:12px;">—</span>`}</div>
       <div style="align-self:center;cursor:pointer;" onclick="openPersonModal('${p.id}')">${dbStageBadge(p.stage)||`<span style="color:var(--text-3);font-size:12px;">—</span>`}</div>
-      <div style="font-size:12px;color:${lastActivityColor};align-self:center;cursor:pointer;" onclick="openPersonModal('${p.id}')">${lastActivity}</div>
+      <div style="font-size:12px;color:${lastActivityColor};align-self:center;cursor:pointer;" onclick="openPersonModal('${p.id}')">${p.lastContactDate ? `${days === 0 ? "Aujourd'hui" : days + "j"} · ${p.lastContactDate}` : "Jamais"}</div>
       <div style="font-size:12px;color:var(--text-2);align-self:center;cursor:pointer;" onclick="openPersonModal('${p.id}')">${p.assignedAgent||"—"}</div>
     </div>`;
   }).join("");
-  el.innerHTML = actionBar + filterBar + `<div style="border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;">${header}${rows}</div>`;
+
+  if (isMobile) {
+    el.innerHTML = actionBar + filterBar + `<div style="border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface);">${rows}</div>`;
+  } else {
+    el.innerHTML = actionBar + filterBar + `<div style="border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;">${header}${rows}</div>`;
+  }
   const s = document.querySelector(".db-search"); if (s && dbSearchQuery) { s.focus(); s.setSelectionRange(dbSearchQuery.length, dbSearchQuery.length); }
 }
 window.dbToggleSelect = function(id, checked) { if (checked) selectedPeople.add(id); else selectedPeople.delete(id); renderDatabase(); };
