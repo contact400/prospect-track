@@ -1562,13 +1562,21 @@ function opsRenderDash() {
   const commVendu = volVendu*0.02;
   const nbVendu = ventesL.length + ventesP.length;
 
+  // Pipeline = inscriptions with no accepted offer + all acheteurs actifs
+  const pipelineListings = opsListings.filter(l=>!["ferme","vendu"].includes(l.status)&&!(l.offers||[]).some(o=>o.status==="accepted"));
+  const volPipelineL = pipelineListings.reduce((s,l)=>s+opsParsePx(l.price),0);
+  const volPipelineB = opsBuyers.reduce((s,b)=>s+opsParsePx(b.budget),0);
+  const commPipeline = (volPipelineL + volPipelineB) * 0.02;
+  const nbPipelineL = pipelineListings.length;
+  const nbPipelineB = opsBuyers.length;
+
   return `
   <div class="ops-kpi-grid" style="grid-template-columns:repeat(6,minmax(0,1fr));">
     <div class="ops-kpi" style="border-left-color:#0C2B5E"><div class="ops-kpi-l">Dossiers actifs</div><div class="ops-kpi-v">${activeL.length+activeP.length}</div><div class="ops-kpi-s">inscriptions + achats</div></div>
     <div class="ops-kpi" style="border-left-color:#378ADD"><div class="ops-kpi-l">Volume immobilier</div><div class="ops-kpi-v">${opsFmtPx(vol)}</div><div class="ops-kpi-s">valeur totale des dossiers</div></div>
     <div class="ops-kpi" style="border-left-color:#1D9E75"><div class="ops-kpi-l">Commission estimée</div><div class="ops-kpi-v">${opsFmtPx(comm)}</div><div class="ops-kpi-s">2% du volume</div></div>
     <div class="ops-kpi" style="border-left-color:${urgCount>0?"#E24B4A":"#888780"}"><div class="ops-kpi-l">Conditions urgentes</div><div class="ops-kpi-v" style="color:${urgCount>0?"#E24B4A":"var(--text)"}">${urgCount}</div><div class="ops-kpi-s">délai ≤ 3 jours</div></div>
-    <div class="ops-kpi" style="border-left-color:#9B59B6;cursor:pointer;" onclick="opsSetView('buyers')"><div class="ops-kpi-l">Acheteurs actifs</div><div class="ops-kpi-v">${opsBuyers.length}</div><div class="ops-kpi-s">${opsFmtPx(opsBuyers.reduce((s,b)=>s+opsParsePx(b.budget),0))} budget total</div></div>
+    <div class="ops-kpi" style="border-left-color:#9B59B6;"><div class="ops-kpi-l" style="color:#9B59B6;">Commission en pipeline</div><div class="ops-kpi-v" style="color:#9B59B6;">${opsFmtPx(commPipeline)}</div><div class="ops-kpi-s">${nbPipelineL} inscription${nbPipelineL!==1?"s":""} + ${nbPipelineB} acheteur${nbPipelineB!==1?"s":""}</div></div>
     <div class="ops-kpi" style="border-left-color:#534AB7;background:#F4F3FF;"><div class="ops-kpi-l" style="color:#534AB7;">Volume d'affaire vendu</div><div class="ops-kpi-v" style="color:#534AB7;">${opsFmtPx(volVendu)}</div><div class="ops-kpi-s" style="color:#534AB7;">${nbVendu} dossier${nbVendu!==1?"s":""} · comm. ${opsFmtPx(commVendu)}</div></div>
   </div>
   <div class="ops-two-col">
