@@ -1141,15 +1141,77 @@ window.opsSaveOffer = async function(lid) {
   showToast("Offre enregistrée ✓");
 };
 
-window.opsAcceptOffer = async function(lid, oid) {
+window.opsAcceptOffer = function(lid, oid) {
   const l = opsListings.find(x=>x.id===lid);
   if (!l) return;
-  const acceptedAt = new Date().toISOString();
-  const base = new Date(acceptedAt);
+  const o = (l.offers||[]).find(x=>x.id===oid);
+  if (!o) return;
 
-  // Use local date string to avoid UTC offset shifting the base date
-  const localToday = new Date(base.getFullYear(), base.getMonth(), base.getDate());
-  const addDays = (n) => { const d=new Date(localToday); d.setDate(d.getDate()+n); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
+  // Default the date picker to today in YYYY-MM-DD (local time)
+  const now = new Date();
+  const todayLocal = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+
+  // Build a summary of the conditions so the user can see what deadlines will be affected
+  const condLines = [
+    o.conditions.inspection ? `<li>Inspection — ${o.conditions.inspection}j</li>` : "",
+    o.conditions.financing  ? `<li>Financement — ${o.conditions.financing}j</li>`  : "",
+    o.conditions.docReview  ? `<li>Revue de documents — ${o.conditions.docReview}j</li>` : "",
+    o.conditions.other      ? `<li>${o.conditions.otherDetails||"Autre"} — ${o.conditions.other}j</li>` : "",
+  ].filter(Boolean).join("");
+
+  document.getElementById("opsModalContent").innerHTML = `
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Accepter l'offre</div>
+        <div class="modal-sub">${o.buyer||o.agent||"Offre"} · ${o.price ? Number(o.price).toLocaleString("fr-CA")+" $" : ""}</div>
+      </div>
+      <button class="close-x" onclick="closeAllModals()">×</button>
+    </div>
+    <div style="padding:20px 24px;display:flex;flex-direction:column;gap:18px;">
+      <div style="background:#F0F4FF;border:1px solid #C7D4F0;border-radius:10px;padding:14px 16px;">
+        <div style="font-size:12px;font-weight:600;color:#3A4A6B;margin-bottom:4px;">⚠ Date d'acceptation réelle</div>
+        <div style="font-size:12px;color:#5A6A8B;line-height:1.5;">
+          Les délais des conditions seront calculés à partir de cette date, pas d'aujourd'hui.
+          Entrez la date à laquelle l'offre a <strong>réellement</strong> été acceptée.
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Date d'acceptation</label>
+        <input type="date" id="offer-accepted-date" value="${todayLocal}" max="${todayLocal}"
+          style="font-size:15px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;" />
+      </div>
+      ${condLines ? `
+      <div>
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);margin-bottom:8px;">Conditions — délais calculés depuis cette date</div>
+        <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px;">
+          ${condLines.replace(/<li>/g,'<li style="font-size:13px;color:var(--text-2);background:var(--bg);padding:8px 12px;border-radius:6px;">').replace(/<\/li>/g,'</li>')}
+        </ul>
+      </div>` : ""}
+    </div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeAllModals()">Annuler</button>
+      <button class="btn-primary" style="background:#1D9E75;border-color:#1D9E75;" onclick="opsConfirmAcceptOffer('${lid}','${oid}')">✓ Confirmer l'acceptation</button>
+    </div>`;
+  openModal("opsModal");
+};
+
+window.opsConfirmAcceptOffer = async function(lid, oid) {
+  const l = opsListings.find(x=>x.id===lid);
+  if (!l) return;
+
+  const dateInput = document.getElementById("offer-accepted-date");
+  if (!dateInput || !dateInput.value) { showToast("Veuillez choisir une date d'acceptation"); return; }
+
+  // Parse the chosen date in local time (avoid UTC shift)
+  const [y, m, d] = dateInput.value.split("-").map(Number);
+  const localBase = new Date(y, m - 1, d);
+  const acceptedAt = dateInput.value; // store as YYYY-MM-DD string (no UTC drift)
+
+  const addDays = (n) => {
+    const dt = new Date(localBase);
+    dt.setDate(dt.getDate() + n);
+    return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+  };
 
   const offers = (l.offers||[]).map(o=>{
     if (o.id !== oid) return o;
@@ -1184,7 +1246,7 @@ window.opsAcceptOffer = async function(lid, oid) {
     updatedAt: serverTimestamp()
   });
   closeAllModals();
-  showToast("Offre acceptée — conditions et délais mis à jour ✓");
+  showToast("Offre acceptée — conditions et délais calculés depuis le "+dateInput.value+" ✓");
 };
 
 window.opsSetOfferStatus = async function(lid, oid, status) {
