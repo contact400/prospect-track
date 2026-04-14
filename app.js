@@ -998,6 +998,11 @@ window.opsSavePurchase = async function(editId) {
     const ref=await addDoc(collection(db,"ops_purchases"),data);
     opsActivePid=ref.id;
   }
+  // If this achat was converted from an acheteur actif, remove the buyer record
+  const sourceBuyerId = document.getElementById("om-source-buyer-id")?.value;
+  if (!editId && sourceBuyerId) {
+    try { await deleteDoc(doc(db,"ops_buyers",sourceBuyerId)); } catch(e) { console.warn("Could not delete source buyer:", e); }
+  }
   closeAllModals(); opsView="purchases";
   showToast(editId?"Achat mis à jour ✓":"Achat enregistré — délais calculés depuis le "+acceptedAt+" ✓");
 };
@@ -2054,15 +2059,20 @@ window.opsCycleBuyerStage = async function(id) {
 window.opsConvertBuyerToAchat = function(id) {
   const b = opsBuyers.find(x=>x.id===id);
   if (!b) return;
-  // Pre-fill the Nouvel achat form with buyer data then open it
+  // Open the Nouvel achat form then pre-fill with buyer data
   opsOpenNewPurchase();
-  // After modal renders, fill in the fields
   setTimeout(() => {
     const setVal = (elId, val) => { const el = document.getElementById(elId); if (el && val) el.value = val; };
     setVal("om-buyer", b.name);
     setVal("om-agent", b.agent);
     const rawBudget = (b.budget||"").replace(/[^0-9]/g,"");
     if (rawBudget) setVal("om-price", Number(rawBudget).toLocaleString("fr-CA")+" $");
+    // Store the source buyer ID in a hidden field so opsSavePurchase can delete it on save
+    const hidden = document.createElement("input");
+    hidden.type = "hidden";
+    hidden.id = "om-source-buyer-id";
+    hidden.value = id;
+    document.getElementById("opsModalContent").appendChild(hidden);
   }, 80);
 };
 
