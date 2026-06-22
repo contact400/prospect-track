@@ -3145,3 +3145,371 @@ window.opsShowNote = function(aid, note) {
     <div class="modal-actions"><button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="closeAllModals()">Fermer</button></div>`;
   openModal("opsModal");
 };
+/* ════════════════════════════════════════════════════════════════════════
+   TRACK — COMPTABILITÉ · PHASE 1
+   Receivables / income engine + projected-revenue view (owner-only)
+
+   PASTE this whole block into app.js (a good spot is right after the Ops
+   section, e.g. after the buyers code / before the Database section).
+
+   It is self-contained except for FIVE small wiring edits listed at the
+   bottom of this file (nav, switchView, setupRoleUI, subscribe/unsubscribe,
+   and two one-line re-render hooks in the ops snapshots).
+
+   Reuses existing helpers: opsParsePx, opsFmtPx, opsFmtDate, openModal,
+   closeAllModals, showToast, and globals opsListings / opsPurchases /
+   OPS_PURCHASE_SOLD / currentUser / isAdmin.
+   ════════════════════════════════════════════════════════════════════════ */
+
+// ── Commission waterfall constants ─────────────────────────
+// Reverse-engineered from the corporate pay stub (reconciles to the penny).
+const ACC_COMM_RATE        = 0.02;     // BACHA commission on sale price
+const ACC_GST_RATE         = 0.05;     // TPS
+const ACC_QST_RATE         = 0.09975;  // TVQ
+const ACC_REMAX_RATE       = 0.05;     // RE/MAX retribution (5% of commission)
+const ACC_EXPECTED_LAG_DAYS = 14;      // commission lands ~14 days after the acte de vente
+
+// ── State ──────────────────────────────────────────────────
+let unsubscribeReceivables = null;
+let accOverrides = {};          // keyed by dealId → persisted edits
+let accView = "projected";      // "projected" | "received"
+
+// ── Commission engine ──────────────────────────────────────
+// One source of truth for the full waterfall. Returns every figure the
+// accounting section needs. (Ops keeps its own flat × 0.02 — untouched.)
+function opsCommission(price) {
+  const p       = typeof price === "number" ? price : opsParsePx(price);
+  const gross   = p * ACC_COMM_RATE;            // brut
+  const gstColl = gross * ACC_GST_RATE;         // TPS collected
+  const qstColl = gross * ACC_QST_RATE;         // TVQ collected
+  const retrib  = gross * ACC_REMAX_RATE;       // RE/MAX retribution
+  const gstItc  = retrib * ACC_GST_RATE;        // TPS paid to RE/MAX (input tax credit)
+  const qstItr  = retrib * ACC_QST_RATE;        // TVQ paid to RE/MAX (input tax refund)
+  const deposit = gross + gstColl + qstColl - retrib - gstItc - qstItr; // net deposit to corp acct
+  const net     = gross - retrib;               // "actually yours", pre-tax (= 1.9% of price)
+  const taxToRemit = (gstColl - gstItc) + (qstColl - qstItr); // held in trust, net of credits
+  return { salePrice:p, gross, gstColl, qstColl, retrib, gstItc, qstItr, deposit, net, taxToRemit };
+}
+
+// ── Local-time date utils (no UTC drift) ───────────────────
+function accAddDays(ds, n) {
+  if (!ds) return "";
+  const [y,m,dd] = ds.slice(0,10).split("-").map(Number);
+  const d = new Date(y, m-1, dd); d.setDate(d.getDate()+n);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function accToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+
+// ── Firestore subscription (override docs only) ────────────
+function subscribeToReceivables() {
+  const qy = query(collection(db, "accounting_receivables"));
+  unsubscribeReceivables = onSnapshot(qy, snap => {
+    accOverrides = {};
+    snap.docs.forEach(d => { accOverrides[d.id] = d.data(); });
+    if (document.getElementById("view-comptabilite")?.classList.contains("active")) renderComptabilite();
+  });
+}
+
+async function accSaveOverride(dealId, patch) {
+  try {
+    await setDoc(doc(db, "accounting_receivables", dealId), {
+      ...patch, updatedAt: serverTimestamp(), updatedBy: currentUser.uid
+    }, { merge:true });
+  } catch (e) {
+    console.warn("Receivable override failed:", e);
+    showToast("Échec de l'enregistrement");
+  }
+}
+
+// ── Derive receivables from closed deals, merge overrides ──
+function accBuildReceivables() {
+  const rows = [];
+  opsListings
+    .filter(l => ["ferme","vendu"].includes(l.status))
+    .forEach(l => rows.push(accReceivableFor("l", l.id, l.addr, opsParsePx(l.offerPrice||l.price), l.notaryDate)));
+  opsPurchases
+    .filter(p => OPS_PURCHASE_SOLD.includes(p.status||"active"))
+    .forEach(p => rows.push(accReceivableFor("p", p.id, p.addr, opsParsePx(p.price), p.notaryDate)));
+  return rows;
+}
+function accReceivableFor(type, id, addr, price, notaryDate) {
+  const ov = accOverrides[id] || {};
+  const c  = opsCommission(price);
+  const dateEarned   = ov.dateEarned   || notaryDate || "";
+  const expectedDate = ov.expectedDate || (dateEarned ? accAddDays(dateEarned, ACC_EXPECTED_LAG_DAYS) : "");
+  const status       = ov.status || "expected"; // earned → expected → received
+  return {
+    dealId:id, dealType:type, addr:addr||"—",
+    salePrice:price, gross:c.gross, net:c.net, deposit:c.deposit, taxToRemit:c.taxToRemit,
+    dateEarned, expectedDate, status,
+    actualReceivedDate: ov.actualReceivedDate || "",
+    actualAmount: (ov.actualAmount != null ? ov.actualAmount : null),
+    notes: ov.notes || ""
+  };
+}
+
+// ── Status helpers ─────────────────────────────────────────
+const ACC_STATUS = {
+  earned:   { label:"Gagné",   color:"#888780", next:"expected" },
+  expected: { label:"Attendu", color:"#185FA5", next:"received" },
+  received: { label:"Reçu",    color:"#1D9E75", next:null }
+};
+function accDateBadge(ds) {
+  if (!ds) return { color:"#888780", txt:"—" };
+  const [y,m,dd] = ds.slice(0,10).split("-").map(Number);
+  const d = new Date(y, m-1, dd); const t = new Date(); t.setHours(0,0,0,0);
+  const days = Math.round((d - t) / 86400000);
+  const color = days < 0 ? "#C0392B" : days <= 7 ? "#BA7517" : "#1D9E75";
+  const txt   = days < 0 ? `en retard ${Math.abs(days)}j` : days === 0 ? "aujourd'hui" : `dans ${days}j`;
+  return { color, txt };
+}
+
+// ── Status actions ─────────────────────────────────────────
+window.accAdvanceStatus = function(dealId, current) {
+  const next = ACC_STATUS[current]?.next;
+  if (!next) return;
+  if (next === "received") { accMarkReceived(dealId); return; } // capture date + amount
+  accSaveOverride(dealId, { status: next });
+};
+window.accRevertStatus = function(dealId, current) {
+  const prev = current === "received" ? "expected" : current === "expected" ? "earned" : null;
+  if (!prev) return;
+  const patch = { status: prev };
+  if (current === "received") { patch.actualReceivedDate = ""; patch.actualAmount = null; }
+  accSaveOverride(dealId, patch);
+};
+window.accSetExpectedDate = function(dealId) {
+  const cur = (accOverrides[dealId]?.expectedDate) || "";
+  const v = prompt("Date de paiement prévue (AAAA-MM-JJ) :", cur || accToday());
+  if (v == null) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v.trim())) { showToast("Format attendu : AAAA-MM-JJ"); return; }
+  accSaveOverride(dealId, { expectedDate: v.trim() });
+};
+window.accEditNotes = function(dealId) {
+  const cur = (accOverrides[dealId]?.notes) || "";
+  const v = prompt("Note :", cur);
+  if (v == null) return;
+  accSaveOverride(dealId, { notes: v });
+};
+
+// ── Mark-received modal (reuses #opsModalContent) ──────────
+window.accMarkReceived = function(dealId) {
+  const r = accBuildReceivables().find(x => x.dealId === dealId);
+  if (!r) return;
+  document.getElementById("opsModalContent").innerHTML = `
+    <div class="modal-title">Marquer comme reçu</div>
+    <div class="modal-sub">${r.addr}</div>
+    <div style="margin-top:14px;">
+      <div class="form-group">
+        <label>Date de réception réelle</label>
+        <input type="date" id="acc-recv-date" value="${r.actualReceivedDate || accToday()}" max="${accToday()}">
+      </div>
+      <div class="form-group">
+        <label>Montant net déposé</label>
+        <input type="text" id="acc-recv-amt" value="${opsFmtPx(Math.round(r.deposit))}"
+               oninput="this.value=this.value.replace(/[^0-9 ]/g,'')">
+        <div style="font-size:11px;color:var(--text-3);margin-top:4px;">
+          Dépôt net calculé : ${opsFmtPx(Math.round(r.deposit))} · dont taxes en fiducie ${opsFmtPx(Math.round(r.taxToRemit))}
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;">
+      <button class="btn-ghost" onclick="closeAllModals()">Annuler</button>
+      <button class="btn-primary" style="background:#1D9E75;border-color:#1D9E75;"
+              onclick="accConfirmReceived('${dealId}')">✓ Confirmer la réception</button>
+    </div>`;
+  openModal("opsModal");
+};
+window.accConfirmReceived = async function(dealId) {
+  const date = document.getElementById("acc-recv-date").value;
+  const amt  = opsParsePx(document.getElementById("acc-recv-amt").value);
+  if (!date) { showToast("Indiquez la date de réception"); return; }
+  await accSaveOverride(dealId, { status:"received", actualReceivedDate:date, actualAmount:amt });
+  closeAllModals();
+  showToast("Réception enregistrée ✓");
+};
+
+window.accSetView = function(v) { accView = v; renderComptabilite(); };
+
+// ── Render ─────────────────────────────────────────────────
+function renderComptabilite() {
+  const el = document.getElementById("comptaContent");
+  if (!el) return;
+  if (!isAdmin) { el.innerHTML = `<div class="ops-empty">Accès réservé.</div>`; return; }
+
+  const rows = accBuildReceivables();
+  const notReceived = rows.filter(r => r.status !== "received");
+  const received    = rows.filter(r => r.status === "received");
+
+  const sumExpected = notReceived.reduce((s,r) => s + r.deposit, 0);
+  const sumCashedIn = received.reduce((s,r) => s + (r.actualAmount != null ? r.actualAmount : r.deposit), 0);
+  const sumTaxTrust = notReceived.reduce((s,r) => s + r.taxToRemit, 0);
+  const sumNetTotal = rows.reduce((s,r) => s + r.net, 0);
+
+  const tabs = `
+    <div class="ops-tabs" style="margin-bottom:1rem;">
+      <button class="ops-tab${accView==="projected"?" active":""}" onclick="accSetView('projected')">
+        À recevoir <span class="ops-tab-count">${notReceived.length}</span></button>
+      <button class="ops-tab${accView==="received"?" active":""}" onclick="accSetView('received')">
+        Encaissé <span class="ops-tab-count">${received.length}</span></button>
+    </div>`;
+
+  const kpis = `
+    <div class="ops-kpi-row" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:1.25rem;">
+      <div class="ops-kpi" style="border-left-color:#185FA5">
+        <div class="ops-kpi-l">Net à recevoir</div>
+        <div class="ops-kpi-v">${opsFmtPx(Math.round(sumExpected))}</div>
+        <div class="ops-kpi-s">${notReceived.length} dossier${notReceived.length!==1?"s":""} non encaissé${notReceived.length!==1?"s":""}</div>
+      </div>
+      <div class="ops-kpi" style="border-left-color:#1D9E75">
+        <div class="ops-kpi-l">Encaissé</div>
+        <div class="ops-kpi-v">${opsFmtPx(Math.round(sumCashedIn))}</div>
+        <div class="ops-kpi-s">${received.length} paiement${received.length!==1?"s":""} reçu${received.length!==1?"s":""}</div>
+      </div>
+      <div class="ops-kpi" style="border-left-color:#9B59B6">
+        <div class="ops-kpi-l" style="color:#9B59B6;">Taxes en fiducie</div>
+        <div class="ops-kpi-v" style="color:#9B59B6;">${opsFmtPx(Math.round(sumTaxTrust))}</div>
+        <div class="ops-kpi-s">TPS/TVQ à remettre (à recevoir)</div>
+      </div>
+      <div class="ops-kpi" style="border-left-color:#534AB7;background:#F4F3FF;">
+        <div class="ops-kpi-l" style="color:#534AB7;">Revenu net total</div>
+        <div class="ops-kpi-v" style="color:#534AB7;">${opsFmtPx(Math.round(sumNetTotal))}</div>
+        <div class="ops-kpi-s" style="color:#534AB7;">commission − rétribution (1,9 %)</div>
+      </div>
+    </div>`;
+
+  el.innerHTML = tabs + kpis + (accView === "received"
+    ? accRenderReceived(received)
+    : accRenderProjected(notReceived));
+}
+
+function accRenderProjected(list) {
+  list = [...list].sort((a,b) => (a.expectedDate||"9999").localeCompare(b.expectedDate||"9999"));
+  let running = 0;
+  const rows = list.map(r => {
+    running += r.deposit;
+    const st = ACC_STATUS[r.status] || ACC_STATUS.expected;
+    const db = accDateBadge(r.expectedDate);
+    const note = r.notes ? `<div style="font-size:11px;color:var(--text-3);margin-top:3px;">📝 ${r.notes}</div>` : "";
+    return `
+    <div class="ops-deal-row" style="align-items:flex-start;">
+      <div class="ops-deal-dot" style="background:${db.color};margin-top:4px;"></div>
+      <div class="ops-deal-info">
+        <div class="ops-deal-addr">${r.addr}
+          <span class="ops-pill" style="background:${st.color}1A;color:${st.color};border:1px solid ${st.color}40;margin-left:6px;cursor:pointer;"
+                onclick="accAdvanceStatus('${r.dealId}','${r.status}')" title="Avancer le statut">${st.label} →</span>
+        </div>
+        <div class="ops-deal-meta">
+          Vente ${opsFmtPx(r.salePrice)} · net ${opsFmtPx(Math.round(r.net))} · taxes ${opsFmtPx(Math.round(r.taxToRemit))}
+        </div>
+        ${note}
+      </div>
+      <div style="text-align:right;min-width:150px;">
+        <div class="ops-deal-price">${opsFmtPx(Math.round(r.deposit))}</div>
+        <div style="font-size:11px;color:${db.color};font-weight:600;cursor:pointer;" onclick="accSetExpectedDate('${r.dealId}')"
+             title="Modifier la date prévue">${opsFmtDate(r.expectedDate)} · ${db.txt} ✎</div>
+        <div style="font-size:11px;color:var(--text-3);margin-top:2px;">cumul ${opsFmtPx(Math.round(running))}</div>
+        <div style="margin-top:6px;display:flex;gap:8px;justify-content:flex-end;">
+          <span style="font-size:11px;color:#1D9E75;cursor:pointer;font-weight:600;" onclick="accMarkReceived('${r.dealId}')">Marquer reçu</span>
+          <span style="font-size:11px;color:var(--text-3);cursor:pointer;" onclick="accEditNotes('${r.dealId}')">Note</span>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+  return `<div class="ops-card">${list.length ? rows
+    : `<div class="ops-empty">Aucun revenu projeté. Les ventes fermées apparaîtront ici automatiquement.</div>`}</div>`;
+}
+
+function accRenderReceived(list) {
+  list = [...list].sort((a,b) => (b.actualReceivedDate||"").localeCompare(a.actualReceivedDate||""));
+  const rows = list.map(r => {
+    const amt = r.actualAmount != null ? r.actualAmount : r.deposit;
+    return `
+    <div class="ops-deal-row">
+      <div class="ops-deal-dot" style="background:#1D9E75;"></div>
+      <div class="ops-deal-info">
+        <div class="ops-deal-addr">${r.addr}
+          <span class="ops-pill" style="background:#1D9E751A;color:#1D9E75;border:1px solid #1D9E7540;margin-left:6px;">Reçu</span>
+        </div>
+        <div class="ops-deal-meta">Vente ${opsFmtPx(r.salePrice)} · reçu le ${opsFmtDate(r.actualReceivedDate)}</div>
+      </div>
+      <div style="text-align:right;min-width:130px;">
+        <div class="ops-deal-price">${opsFmtPx(Math.round(amt))}</div>
+        <div style="font-size:11px;color:var(--text-3);cursor:pointer;margin-top:4px;"
+             onclick="accRevertStatus('${r.dealId}','received')" title="Annuler la réception">↩ rétablir</div>
+      </div>
+    </div>`;
+  }).join("");
+  return `<div class="ops-card">${list.length ? rows
+    : `<div class="ops-empty">Aucun paiement encaissé pour l'instant.</div>`}</div>`;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   FIVE WIRING EDITS (apply by hand in app.js / index.html)
+   ════════════════════════════════════════════════════════════════════════
+
+   1) index.html — add the owner-only nav item in BOTH menus (hidden by
+      default, shown for admins), right after the Admin item.
+
+      Sidebar (after the adminNav <a>, ~line 62):
+        <a href="#" class="nav-item" data-view="comptabilite" id="comptaNav"
+           onclick="switchView('comptabilite',this)" style="display:none;">
+          <span class="nav-icon">$</span> Comptabilité
+        </a>
+
+      Mobile drawer (after adminNavMobile, ~line 84):
+        <a href="#" class="nav-item" data-view="comptabilite" id="comptaNavMobile"
+           onclick="switchView('comptabilite',this);closeMobileNav()" style="display:none;">$ Comptabilité</a>
+
+   2) index.html — add the section container inside <main>, after view-admin
+      (~line 181):
+
+        <div id="view-comptabilite" class="view">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">Comptabilité</h2>
+              <p class="view-sub">Revenus projetés &amp; encaissés</p>
+            </div>
+          </div>
+          <div id="comptaContent"></div>
+        </div>
+
+   3) app.js — switchView() (~line 836-841): extend the mobileTitle ternary and
+      add a dispatch line.
+
+        ...name==="database"?"Database":name==="comptabilite"?"Comptabilité":"Admin";
+        ...
+        if (name==="comptabilite") renderComptabilite();
+
+   4) app.js — setupRoleUI() (~line 571-575, inside the `if (isAdmin)` block that
+      reveals adminNav): also reveal the new nav + start the subscription.
+
+        document.getElementById("comptaNav").style.display="";
+        document.getElementById("comptaNavMobile").style.display="";
+        if (!unsubscribeReceivables) subscribeToReceivables();
+
+   5) app.js — logout cleanup (~line 549-551, beside the other ops unsubscribes):
+
+        if (unsubscribeReceivables) { unsubscribeReceivables(); unsubscribeReceivables = null; }
+
+   OPTIONAL (keeps the section live when a deal changes while you're viewing it):
+   in subscribeToOps(), inside BOTH onSnapshot callbacks, add one line so the
+   accounting view re-renders too:
+
+        if (document.getElementById("view-comptabilite")?.classList.contains("active")) renderComptabilite();
+
+   ════════════════════════════════════════════════════════════════════════
+   FIRESTORE SECURITY RULE (add manually in the Firebase console)
+   ════════════════════════════════════════════════════════════════════════
+
+   match /accounting_receivables/{dealId} {
+     allow read, write: if request.auth != null
+       && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+   }
+
+   (Owner-only, matching the section's isAdmin gate. Adjust the users/role path
+   if your profile collection differs.)
+   ════════════════════════════════════════════════════════════════════════ */
