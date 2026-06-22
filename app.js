@@ -551,6 +551,7 @@ window.handleLogout = async function() {
   if (unsubscribeOpsBuyers) unsubscribeOpsBuyers();
   if (unsubscribeReceivables) { unsubscribeReceivables(); unsubscribeReceivables = null; }
   if (unsubscribeExpenses) { unsubscribeExpenses(); unsubscribeExpenses = null; }
+  if (unsubscribeRecurring) { unsubscribeRecurring(); unsubscribeRecurring = null; }
   await signOut(auth);
 };
 function showLogin() {
@@ -579,6 +580,7 @@ function setupRoleUI() {
     document.getElementById("comptaNavMobile").style.display="";
     if (!unsubscribeReceivables) subscribeToReceivables();
     if (!unsubscribeExpenses) subscribeToExpenses();
+    if (!unsubscribeRecurring) subscribeToRecurring();
     document.getElementById("addProspectBtn").style.display="";
   }
   // Ops nav always shown (access controlled per-dossier)
@@ -3356,6 +3358,8 @@ function renderComptabilite() {
         Encaissé <span class="ops-tab-count">${received.length}</span></button>
       <button class="ops-tab${accView==="expenses"?" active":""}" onclick="accSetView('expenses')">
         Dépenses <span class="ops-tab-count">${accBusinessExpenses().length}</span></button>
+      <button class="ops-tab${accView==="recurring"?" active":""}" onclick="accSetView('recurring')">
+        Récurrent <span class="ops-tab-count">${accRecurring.filter(t=>t.active!==false).length}</span></button>
     </div>`;
 
   const kpis = `
@@ -3382,6 +3386,7 @@ function renderComptabilite() {
       </div>
     </div>`;
 
+  if (accView === "recurring") { el.innerHTML = tabs + accRenderRecurring(); return; }
   if (accView === "expenses") { el.innerHTML = tabs + accRenderExpenses(); return; }
   el.innerHTML = tabs + kpis + (accView === "received"
     ? accRenderReceived(received)
@@ -3490,6 +3495,7 @@ function subscribeToExpenses() {
   const qy = query(collection(db,"accounting_expenses"), orderBy("date","desc"));
   unsubscribeExpenses = onSnapshot(qy, snap => {
     accExpenses = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    accExpensesLoaded = true; accReconcileRecurring();
     if (document.getElementById("view-comptabilite")?.classList.contains("active")) renderComptabilite();
   });
 }
@@ -3596,7 +3602,7 @@ function accRenderExpenses() {
         <div class="ops-deal-addr">${e.vendor||"—"}
           <span class="ops-pill" style="background:#88878018;color:#666;border:1px solid #8887803a;margin-left:6px;">${e.category||"Autre"}</span>
         </div>
-        <div class="ops-deal-meta">${opsFmtDate(e.date)}${e.notes?" · "+e.notes:""}</div>
+        <div class="ops-deal-meta">${opsFmtDate(e.date)}${e.generated?' · <span style="color:#9B59B6;">récurrent</span>':""}${e.notes?" · "+e.notes:""}</div>
       </div>
       <div style="text-align:right;min-width:140px;">
         <div class="ops-deal-price">${opsFmtPx(Math.round(e.amount||0))}</div>
@@ -3610,4 +3616,206 @@ function accRenderExpenses() {
   }).join("");
 
   return kpis + addBtn + `<div class="ops-card">${list.length?rows:`<div class="ops-empty">Aucune dépense enregistrée. Cliquez « Ajouter une dépense ».</div>`}</div>`;
+}
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   TRACK — COMPTABILITÉ · PHASE 3  (recurring bills + monthly burn)
+   Templates auto-materialize into the Dépenses ledger, one entry per due
+   period, with deterministic ids (r_<tplId>_<YYYY-MM>) → idempotent, no
+   duplicate-write races. Generated up to the current month only.
+   ════════════════════════════════════════════════════════════════════════ */
+
+let unsubscribeRecurring = null;
+let accRecurring = [];
+let accExpensesLoaded = false;
+let accRecurringLoaded = false;
+
+const ACC_FREQ = {
+  monthly:   { label:"Mensuel",     per:1  },
+  quarterly: { label:"Trimestriel", per:3  },
+  annual:    { label:"Annuel",      per:12 }
+};
+
+// Occurrences due from start month up to (and including) the current month.
+function accDuePeriods(tpl, todayStr) {
+  if (!tpl.startDate) return [];
+  const [sy,sm,sd] = tpl.startDate.slice(0,10).split("-").map(Number);
+  const step = (ACC_FREQ[tpl.frequency]?.per) || 1;
+  const end  = tpl.endDate ? tpl.endDate.slice(0,10) : null;
+  const curMonth = todayStr.slice(0,7);
+  const out = [];
+  let y = sy, m = sm;
+  for (let guard=0; guard<600; guard++) {
+    const lastDay = new Date(y, m, 0).getDate();
+    const dd = Math.min(sd, lastDay);
+    const occ = `${y}-${String(m).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
+    if (occ.slice(0,7) > curMonth) break;   // future month → done
+    if (occ > todayStr) break;              // future day within current month
+    if (!end || occ <= end) out.push({ periodKey: occ.slice(0,7), date: occ });
+    m += step; while (m > 12) { m -= 12; y += 1; }
+  }
+  return out;
+}
+
+async function accReconcileRecurring() {
+  if (!accExpensesLoaded || !accRecurringLoaded || !isAdmin) return;
+  const today = accToday();
+  for (const tpl of accRecurring.filter(t => t.active !== false)) {
+    for (const d of accDuePeriods(tpl, today)) {
+      const id = `r_${tpl.id}_${d.periodKey}`;
+      if (accExpenses.some(e => e.id === id)) continue; // already materialized / edited
+      try {
+        await setDoc(doc(db, "accounting_expenses", id), {
+          date:d.date, amount:tpl.amount||0, category:tpl.category||"Autre", vendor:tpl.vendor||"",
+          isBusiness: tpl.isBusiness!==false, taxable: tpl.taxable!==false, notes: tpl.notes||"",
+          recurringId: tpl.id, period:d.periodKey, generated:true,
+          createdAt: serverTimestamp(), createdBy: currentUser.uid
+        }, { merge:false });
+      } catch(err) { console.warn("Recurring materialize failed", id, err); }
+    }
+  }
+}
+
+function subscribeToRecurring() {
+  const qy = query(collection(db,"accounting_recurring"), orderBy("createdAt","desc"));
+  unsubscribeRecurring = onSnapshot(qy, snap => {
+    accRecurring = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    accRecurringLoaded = true; accReconcileRecurring();
+    if (document.getElementById("view-comptabilite")?.classList.contains("active")) renderComptabilite();
+  });
+}
+
+function accMonthlyEquiv(tpl) { return (tpl.amount||0) / ((ACC_FREQ[tpl.frequency]?.per) || 1); }
+
+// ── Add / edit / delete ────────────────────────────────────
+function accRecurringForm(t) {
+  t = t || {};
+  const cats  = ACC_EXPENSE_CATS.map(c => `<option value="${c}"${t.category===c?" selected":""}>${c}</option>`).join("");
+  const freqs = Object.entries(ACC_FREQ).map(([k,v]) => `<option value="${k}"${t.frequency===k?" selected":""}>${v.label}</option>`).join("");
+  return `
+    <div class="modal-title">${t.id ? "Modifier le paiement récurrent" : "Nouveau paiement récurrent"}</div>
+    <div style="margin-top:14px;">
+      <div class="form-group"><label>Nom / fournisseur</label>
+        <input type="text" id="ar-vendor" value="${accEsc(t.vendor)}" placeholder="ex: RE/MAX franchise, Canva…"></div>
+      <div class="form-group"><label>Montant par période (taxes incluses)</label>
+        <input type="text" id="ar-amount" value="${t.amount?opsFmtPx(Math.round(t.amount)):""}" placeholder="ex: 250 $"
+               oninput="this.value=this.value.replace(/[^0-9 ]/g,'')"></div>
+      <div class="form-group" style="display:flex;gap:12px;">
+        <div style="flex:1;"><label>Fréquence</label><select id="ar-freq">${freqs}</select></div>
+        <div style="flex:1;"><label>Catégorie</label><select id="ar-cat">${cats}</select></div>
+      </div>
+      <div class="form-group" style="display:flex;gap:12px;">
+        <div style="flex:1;"><label>Début</label><input type="date" id="ar-start" value="${t.startDate||accToday()}"></div>
+        <div style="flex:1;"><label>Fin (optionnel)</label><input type="date" id="ar-end" value="${t.endDate||""}"></div>
+      </div>
+      <div class="form-group" style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;">
+        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:13px;">
+          <input type="checkbox" id="ar-biz" ${t.isBusiness!==false?"checked":""}> Affaires</label>
+        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:13px;">
+          <input type="checkbox" id="ar-tax" ${t.taxable!==false?"checked":""}> Taxable</label>
+        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:13px;">
+          <input type="checkbox" id="ar-active" ${t.active!==false?"checked":""}> Actif</label>
+      </div>
+      <div class="form-group"><label>Note</label>
+        <input type="text" id="ar-notes" value="${accEsc(t.notes)}" placeholder="optionnel"></div>
+      <div style="font-size:11px;color:var(--text-3);line-height:1.5;">
+        Chaque période échue génère automatiquement une entrée dans l'onglet Dépenses (taxes extraites).
+        La désactivation arrête les générations futures; les entrées passées restent.
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;">
+      ${t.id?`<button class="btn-ghost" style="color:#C0392B;margin-right:auto;" onclick="accDeleteRecurring('${t.id}')">Supprimer</button>`:""}
+      <button class="btn-ghost" onclick="closeAllModals()">Annuler</button>
+      <button class="btn-primary" onclick="accSaveRecurring(${t.id?`'${t.id}'`:"null"})">Enregistrer</button>
+    </div>`;
+}
+window.accAddRecurring  = function() { document.getElementById("opsModalContent").innerHTML = accRecurringForm(null); openModal("opsModal"); };
+window.accEditRecurring = function(id) { const t = accRecurring.find(x=>x.id===id); if(!t) return; document.getElementById("opsModalContent").innerHTML = accRecurringForm(t); openModal("opsModal"); };
+window.accSaveRecurring = async function(editId) {
+  const g = id => document.getElementById(id);
+  const amount = opsParsePx(g("ar-amount").value);
+  if (!amount) { showToast("Indiquez un montant"); return; }
+  const data = {
+    vendor: g("ar-vendor").value.trim(),
+    amount,
+    frequency: g("ar-freq").value,
+    category: g("ar-cat").value,
+    startDate: g("ar-start").value || accToday(),
+    endDate: g("ar-end").value || "",
+    isBusiness: g("ar-biz").checked,
+    taxable: g("ar-tax").checked,
+    active: g("ar-active").checked,
+    notes: g("ar-notes").value.trim(),
+    updatedAt: serverTimestamp()
+  };
+  try {
+    if (editId) { await updateDoc(doc(db,"accounting_recurring",editId), data); }
+    else { data.createdAt = serverTimestamp(); data.createdBy = currentUser.uid; await addDoc(collection(db,"accounting_recurring"), data); }
+    closeAllModals(); showToast(editId ? "Paiement modifié ✓" : "Paiement récurrent ajouté ✓");
+  } catch(err) { console.warn("Recurring save failed:", err); showToast("Échec de l'enregistrement"); }
+};
+window.accDeleteRecurring = async function(id) {
+  if (!confirm("Supprimer ce paiement récurrent? Les dépenses déjà générées seront conservées.")) return;
+  try { await deleteDoc(doc(db,"accounting_recurring",id)); closeAllModals(); showToast("Paiement récurrent supprimé"); }
+  catch(err) { console.warn(err); showToast("Échec de la suppression"); }
+};
+
+// ── Render (recurring tab) ─────────────────────────────────
+function accRenderRecurring() {
+  const active = accRecurring.filter(t => t.active !== false);
+  const all    = [...accRecurring].sort((a,b)=>(a.vendor||"").localeCompare(b.vendor||""));
+  const burn = active.reduce((s,t)=>s+accMonthlyEquiv(t),0);
+  const monthlyCredit = active.reduce((s,t)=>{
+    if (t.isBusiness===false || t.taxable===false) return s;
+    const base = accMonthlyEquiv(t) / ACC_TAX_FACTOR;
+    return s + base*ACC_GST_RATE + base*ACC_QST_RATE;
+  },0);
+
+  const kpis = `
+    <div class="ops-kpi-row" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:1.25rem;">
+      <div class="ops-kpi" style="border-left-color:#BA7517">
+        <div class="ops-kpi-l">Burn mensuel</div>
+        <div class="ops-kpi-v">${opsFmtPx(Math.round(burn))}</div>
+        <div class="ops-kpi-s">${active.length} paiement${active.length!==1?"s":""} actif${active.length!==1?"s":""}</div>
+      </div>
+      <div class="ops-kpi" style="border-left-color:#C0392B">
+        <div class="ops-kpi-l">Coût annuel</div>
+        <div class="ops-kpi-v">${opsFmtPx(Math.round(burn*12))}</div>
+        <div class="ops-kpi-s">burn × 12</div>
+      </div>
+      <div class="ops-kpi" style="border-left-color:#9B59B6">
+        <div class="ops-kpi-l" style="color:#9B59B6;">Crédits taxe / mois</div>
+        <div class="ops-kpi-v" style="color:#9B59B6;">${opsFmtPx(Math.round(monthlyCredit))}</div>
+        <div class="ops-kpi-s">TPS/TVQ récupérable</div>
+      </div>
+    </div>`;
+
+  const addBtn = `<div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+      <button class="btn-primary" style="width:auto;padding:9px 18px;" onclick="accAddRecurring()">+ Ajouter un paiement récurrent</button></div>`;
+
+  const rows = all.map(t=>{
+    const inactive = t.active === false;
+    const freq = ACC_FREQ[t.frequency]?.label || "Mensuel";
+    return `
+    <div class="ops-deal-row" style="${inactive?"opacity:0.5;":""}">
+      <div class="ops-deal-dot" style="background:#BA7517;"></div>
+      <div class="ops-deal-info">
+        <div class="ops-deal-addr">${t.vendor||"—"}
+          <span class="ops-pill" style="background:#88878018;color:#666;border:1px solid #8887803a;margin-left:6px;">${t.category||"Autre"}</span>
+          ${inactive?`<span class="ops-pill" style="background:#88878018;color:#888;border:1px solid #8887803a;margin-left:4px;">inactif</span>`:""}
+        </div>
+        <div class="ops-deal-meta">${freq} · ${opsFmtPx(Math.round(t.amount||0))}${t.notes?" · "+t.notes:""}</div>
+      </div>
+      <div style="text-align:right;min-width:140px;">
+        <div class="ops-deal-price">${opsFmtPx(Math.round(accMonthlyEquiv(t)))}<span style="font-size:10px;color:var(--text-3);font-weight:400;">/mois</span></div>
+        <div style="margin-top:6px;display:flex;gap:10px;justify-content:flex-end;">
+          <span style="font-size:11px;color:var(--text-3);cursor:pointer;" onclick="accEditRecurring('${t.id}')">Modifier</span>
+          <span style="font-size:11px;color:#C0392B;cursor:pointer;" onclick="accDeleteRecurring('${t.id}')">Suppr.</span>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+
+  return kpis + addBtn + `<div class="ops-card">${all.length?rows:`<div class="ops-empty">Aucun paiement récurrent. Cliquez « Ajouter un paiement récurrent ».</div>`}</div>`;
 }
