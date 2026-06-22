@@ -57,7 +57,7 @@
         <a href="#" class="nav-item" data-view="dashboard" id="dashNav" onclick="switchView('dashboard',this)" style="display:none;">
           <span class="nav-icon">◉</span> Dashboard
         </a>
-      <a href="#" class="nav-item" data-view="admin" id="adminNav" onclick="switchView('admin',this)" style="display:none;">
+        <a href="#" class="nav-item" data-view="admin" id="adminNav" onclick="switchView('admin',this)" style="display:none;">
           <span class="nav-icon">◎</span> Admin
         </a>
         <a href="#" class="nav-item" data-view="comptabilite" id="comptaNav" onclick="switchView('comptabilite',this)" style="display:none;">
@@ -84,8 +84,8 @@
         <a href="#" class="nav-item" data-view="ops" id="opsNavMobile" onclick="switchView('ops',this);closeMobileNav()" style="display:none;">◩ BACHA Ops</a>
         <a href="#" class="nav-item" data-view="database" id="databaseNavMobile" onclick="switchView('database',this);closeMobileNav()">👥 Database</a>
         <a href="#" class="nav-item" data-view="dashboard" id="dashNavMobile" onclick="switchView('dashboard',this);closeMobileNav()" style="display:none;">◉ Dashboard</a>
-        <a href="#" class="nav-item" data-view="comptabilite" id="comptaNavMobile" onclick="switchView('comptabilite',this);closeMobileNav()" style="display:none;">$ Comptabilité</a>
         <a href="#" class="nav-item" data-view="admin" id="adminNavMobile" onclick="switchView('admin',this);closeMobileNav()" style="display:none;">◎ Admin</a>
+        <a href="#" class="nav-item" data-view="comptabilite" id="comptaNavMobile" onclick="switchView('comptabilite',this);closeMobileNav()" style="display:none;">$ Comptabilité</a>
         <hr style="border-color:rgba(255,255,255,0.1);margin:12px 0;" />
         <a href="#" class="nav-item" onclick="handleLogout()">→ Sign out</a>
       </nav>
@@ -182,6 +182,16 @@
           <button class="btn-primary" onclick="openInviteAgent()">+ Invite Agent</button>
         </div>
         <div id="adminContent"></div>
+      </div>
+
+      <div id="view-comptabilite" class="view">
+        <div class="view-header">
+          <div>
+            <h2 class="view-title">Comptabilité</h2>
+            <p class="view-sub">Revenus projetés &amp; encaissés</p>
+          </div>
+        </div>
+        <div id="comptaContent"></div>
       </div>
     </main>
   </div>
