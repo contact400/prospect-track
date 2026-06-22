@@ -3360,6 +3360,7 @@ function renderComptabilite() {
         Dépenses <span class="ops-tab-count">${accBusinessExpenses().length}</span></button>
       <button class="ops-tab${accView==="recurring"?" active":""}" onclick="accSetView('recurring')">
         Récurrent <span class="ops-tab-count">${accRecurring.filter(t=>t.active!==false).length}</span></button>
+      <button class="ops-tab${accView==="pnl"?" active":""}" onclick="accSetView('pnl')">Résultats</button>
     </div>`;
 
   const kpis = `
@@ -3386,6 +3387,7 @@ function renderComptabilite() {
       </div>
     </div>`;
 
+  if (accView === "pnl") { el.innerHTML = tabs + accRenderPnl(); return; }
   if (accView === "recurring") { el.innerHTML = tabs + accRenderRecurring(); return; }
   if (accView === "expenses") { el.innerHTML = tabs + accRenderExpenses(); return; }
   el.innerHTML = tabs + kpis + (accView === "received"
@@ -3818,4 +3820,123 @@ function accRenderRecurring() {
   }).join("");
 
   return kpis + addBtn + `<div class="ops-card">${all.length?rows:`<div class="ops-empty">Aucun paiement récurrent. Cliquez « Ajouter un paiement récurrent ».</div>`}</div>`;
+}
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   TRACK — COMPTABILITÉ · PHASE 4  (monthly P&L · cash vs accrual)
+   Revenue = gross commission; RE/MAX retribution shown as an expense line;
+   operating expenses at net-of-recoverable-tax cost (regular method).
+   Net profit = gross commission − retribution − net business expenses.
+   Income basis: accrual → earned (deed) month; cash → received month.
+   (Recurring bills are already materialized into accExpenses — no double count.)
+   ════════════════════════════════════════════════════════════════════════ */
+
+let accPnlBasis = "accrual"; // "accrual" | "cash"
+window.accSetPnlBasis = function(b) { accPnlBasis = b; renderComptabilite(); };
+
+function accFmtMonth(k) {
+  const [y,m] = k.split("-").map(Number);
+  return new Date(y, m-1, 1).toLocaleDateString("fr-CA", { month:"long", year:"numeric" });
+}
+
+function accBuildPnl(basis) {
+  const M = {}; // "YYYY-MM" → { rev, retrib, opex }
+  const bucket = k => (M[k] || (M[k] = { rev:0, retrib:0, opex:0 }));
+
+  // Income — gross commission + RE/MAX retribution, timed by basis
+  accBuildReceivables().forEach(r => {
+    const retrib = r.gross - r.net;
+    if (basis === "cash") {
+      if (r.status !== "received" || !r.actualReceivedDate) return;
+      const b = bucket(r.actualReceivedDate.slice(0,7)); b.rev += r.gross; b.retrib += retrib;
+    } else {
+      if (!r.dateEarned) return;
+      const b = bucket(r.dateEarned.slice(0,7)); b.rev += r.gross; b.retrib += retrib;
+    }
+  });
+
+  // Operating expenses — business only, at net-of-recoverable-tax cost
+  accExpenses.filter(e => e.isBusiness !== false).forEach(e => {
+    if (!e.date) return;
+    const t = accExpenseTax(e);
+    bucket(e.date.slice(0,7)).opex += (e.amount||0) - t.gst - t.qst;
+  });
+
+  return M;
+}
+
+function accRenderPnl() {
+  const M = accBuildPnl(accPnlBasis);
+  const keys = Object.keys(M).sort().reverse();
+  const year = String(new Date().getFullYear());
+
+  let yRev=0, yRet=0, yOpex=0;
+  keys.forEach(k => { if (k.startsWith(year)) { yRev+=M[k].rev; yRet+=M[k].retrib; yOpex+=M[k].opex; } });
+  const yCost = yRet + yOpex;
+  const yNet  = yRev - yCost;
+  const margin = yRev > 0 ? (yNet / yRev * 100) : 0;
+
+  const toggle = `
+    <div class="ops-tabs" style="margin-bottom:1rem;">
+      <button class="ops-tab${accPnlBasis==="accrual"?" active":""}" onclick="accSetPnlBasis('accrual')">Exercice (gagné)</button>
+      <button class="ops-tab${accPnlBasis==="cash"?" active":""}" onclick="accSetPnlBasis('cash')">Caisse (reçu)</button>
+    </div>`;
+
+  const kpis = `
+    <div class="ops-kpi-row" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:1.25rem;">
+      <div class="ops-kpi" style="border-left-color:#185FA5">
+        <div class="ops-kpi-l">Revenus ${year}</div>
+        <div class="ops-kpi-v">${opsFmtPx(Math.round(yRev))}</div>
+        <div class="ops-kpi-s">commission brute</div>
+      </div>
+      <div class="ops-kpi" style="border-left-color:#C0392B">
+        <div class="ops-kpi-l">Coûts ${year}</div>
+        <div class="ops-kpi-v">${opsFmtPx(Math.round(yCost))}</div>
+        <div class="ops-kpi-s">rétribution + dépenses</div>
+      </div>
+      <div class="ops-kpi" style="border-left-color:#1D9E75;background:#F0FBF6;">
+        <div class="ops-kpi-l" style="color:#1A7A4A;">Bénéfice net ${year}</div>
+        <div class="ops-kpi-v" style="color:#1A7A4A;">${opsFmtPx(Math.round(yNet))}</div>
+        <div class="ops-kpi-s" style="color:#1A7A4A;">avant impôt</div>
+      </div>
+      <div class="ops-kpi" style="border-left-color:#534AB7">
+        <div class="ops-kpi-l" style="color:#534AB7;">Marge nette</div>
+        <div class="ops-kpi-v" style="color:#534AB7;">${margin.toFixed(1).replace(".",",")} %</div>
+        <div class="ops-kpi-s">bénéfice / revenus</div>
+      </div>
+    </div>`;
+
+  const th = 'style="text-align:right;padding:8px 10px;font-size:11px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:0.03em;border-bottom:1px solid rgba(0,0,0,0.08);"';
+  const thL = th.replace('text-align:right', 'text-align:left');
+  const td = 'style="text-align:right;padding:9px 10px;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.05);"';
+  const tdL = td.replace('text-align:right', 'text-align:left');
+
+  const body = keys.map(k => {
+    const m = M[k]; const net = m.rev - m.retrib - m.opex;
+    const netColor = net >= 0 ? "#1A7A4A" : "#C0392B";
+    return `<tr>
+      <td ${tdL} style="text-align:left;padding:9px 10px;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.05);text-transform:capitalize;">${accFmtMonth(k)}</td>
+      <td ${td}>${opsFmtPx(Math.round(m.rev))}</td>
+      <td ${td} style="text-align:right;padding:9px 10px;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.05);color:var(--text-3);">${m.retrib?"−"+opsFmtPx(Math.round(m.retrib)):"—"}</td>
+      <td ${td} style="text-align:right;padding:9px 10px;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.05);color:var(--text-3);">${m.opex?"−"+opsFmtPx(Math.round(m.opex)):"—"}</td>
+      <td ${td} style="text-align:right;padding:9px 10px;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.05);font-weight:600;color:${netColor};">${opsFmtPx(Math.round(net))}</td>
+    </tr>`;
+  }).join("");
+
+  const table = `
+    <div class="ops-card" style="padding:4px 8px;">
+      <table style="width:100%;border-collapse:collapse;">
+        <thead><tr>
+          <th ${thL}>Mois</th><th ${th}>Revenus</th><th ${th}>Rétribution</th><th ${th}>Dépenses</th><th ${th}>Bénéfice net</th>
+        </tr></thead>
+        <tbody>${keys.length ? body : `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-3);font-size:13px;">Aucune donnée. Les ventes fermées et les dépenses alimenteront ce tableau.</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div style="font-size:11px;color:var(--text-3);margin-top:10px;line-height:1.5;">
+      Base ${accPnlBasis==="cash"?"caisse — revenus comptabilisés au mois de réception":"exercice — revenus comptabilisés au mois de l'acte de vente"}.
+      Dépenses nettes des taxes récupérables (méthode régulière présumée). Estimation — à valider avec votre comptable.
+    </div>`;
+
+  return toggle + kpis + table;
 }
