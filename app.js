@@ -550,6 +550,7 @@ window.handleLogout = async function() {
   if (unsubscribeOpsPurchases) unsubscribeOpsPurchases();
   if (unsubscribeOpsBuyers) unsubscribeOpsBuyers();
   if (unsubscribeReceivables) { unsubscribeReceivables(); unsubscribeReceivables = null; }
+  if (unsubscribeExpenses) { unsubscribeExpenses(); unsubscribeExpenses = null; }
   await signOut(auth);
 };
 function showLogin() {
@@ -577,6 +578,7 @@ function setupRoleUI() {
     document.getElementById("comptaNav").style.display="";
     document.getElementById("comptaNavMobile").style.display="";
     if (!unsubscribeReceivables) subscribeToReceivables();
+    if (!unsubscribeExpenses) subscribeToExpenses();
     document.getElementById("addProspectBtn").style.display="";
   }
   // Ops nav always shown (access controlled per-dossier)
@@ -3352,6 +3354,8 @@ function renderComptabilite() {
         À recevoir <span class="ops-tab-count">${notReceived.length}</span></button>
       <button class="ops-tab${accView==="received"?" active":""}" onclick="accSetView('received')">
         Encaissé <span class="ops-tab-count">${received.length}</span></button>
+      <button class="ops-tab${accView==="expenses"?" active":""}" onclick="accSetView('expenses')">
+        Dépenses <span class="ops-tab-count">${accBusinessExpenses().length}</span></button>
     </div>`;
 
   const kpis = `
@@ -3378,6 +3382,7 @@ function renderComptabilite() {
       </div>
     </div>`;
 
+  if (accView === "expenses") { el.innerHTML = tabs + accRenderExpenses(); return; }
   el.innerHTML = tabs + kpis + (accView === "received"
     ? accRenderReceived(received)
     : accRenderProjected(notReceived));
@@ -3442,4 +3447,167 @@ function accRenderReceived(list) {
   }).join("");
   return `<div class="ops-card">${list.length ? rows
     : `<div class="ops-empty">Aucun paiement encaissé pour l'instant.</div>`}</div>`;
+}
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   TRACK — COMPTABILITÉ · PHASE 2  (expenses ledger)
+   Manual business-expense log → input tax credits (CTI/RTI).
+   Tax-included totals; TPS/TVQ extracted automatically. No 50% meal cap
+   (full tax captured — cap handled at the accountant level).
+   ════════════════════════════════════════════════════════════════════════ */
+
+let unsubscribeExpenses = null;
+let accExpenses = [];
+
+const ACC_TAX_FACTOR = 1 + ACC_GST_RATE + ACC_QST_RATE; // 1.14975
+const ACC_EXPENSE_CATS = [
+  "Essence & déplacement",
+  "Repas & représentation",
+  "Publicité & marketing",
+  "Bureau & fournitures",
+  "Logiciels & abonnements",
+  "Téléphone & internet",
+  "Formation & développement",
+  "Honoraires professionnels",
+  "Frais bancaires",
+  "Cadeaux clients",
+  "Cotisations & permis",
+  "Autre"
+];
+
+function accEsc(s){ return String(s||"").replace(/"/g,"&quot;"); }
+
+// Back out TPS/TVQ from a tax-included total. Business + taxable only → credit.
+function accExpenseTax(e) {
+  if (!e || e.isBusiness === false || e.taxable === false) return { base:(e?.amount||0), gst:0, qst:0 };
+  const base = (e.amount||0) / ACC_TAX_FACTOR;
+  return { base, gst: base * ACC_GST_RATE, qst: base * ACC_QST_RATE };
+}
+function accBusinessExpenses() { return accExpenses.filter(e => e.isBusiness !== false); }
+
+function subscribeToExpenses() {
+  const qy = query(collection(db,"accounting_expenses"), orderBy("date","desc"));
+  unsubscribeExpenses = onSnapshot(qy, snap => {
+    accExpenses = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    if (document.getElementById("view-comptabilite")?.classList.contains("active")) renderComptabilite();
+  });
+}
+
+// ── Add / edit / delete ────────────────────────────────────
+function accExpenseForm(e) {
+  e = e || {};
+  const cats = ACC_EXPENSE_CATS.map(c => `<option value="${c}"${e.category===c?" selected":""}>${c}</option>`).join("");
+  return `
+    <div class="modal-title">${e.id ? "Modifier la dépense" : "Nouvelle dépense"}</div>
+    <div style="margin-top:14px;">
+      <div class="form-group"><label>Date</label>
+        <input type="date" id="ae-date" value="${e.date||accToday()}" max="${accToday()}"></div>
+      <div class="form-group"><label>Montant total (taxes incluses)</label>
+        <input type="text" id="ae-amount" value="${e.amount?opsFmtPx(Math.round(e.amount)):""}" placeholder="ex: 114 $"
+               oninput="this.value=this.value.replace(/[^0-9 ]/g,'')"></div>
+      <div class="form-group"><label>Catégorie</label><select id="ae-cat">${cats}</select></div>
+      <div class="form-group"><label>Fournisseur</label>
+        <input type="text" id="ae-vendor" value="${accEsc(e.vendor)}" placeholder="ex: Esso, Canva, restaurant…"></div>
+      <div class="form-group" style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;">
+        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:13px;">
+          <input type="checkbox" id="ae-biz" ${e.isBusiness!==false?"checked":""}> Dépense d'affaires</label>
+        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:13px;">
+          <input type="checkbox" id="ae-tax" ${e.taxable!==false?"checked":""}> Taxable (TPS+TVQ)</label>
+      </div>
+      <div class="form-group"><label>Note</label>
+        <input type="text" id="ae-notes" value="${accEsc(e.notes)}" placeholder="optionnel"></div>
+      <div style="font-size:11px;color:var(--text-3);line-height:1.5;">
+        Montant saisi taxes incluses — la TPS (5 %) et la TVQ (9,975 %) sont extraites automatiquement
+        pour le crédit (CTI/RTI). Décochez « Taxable » pour une dépense sans taxes (assurance, etc.).
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;">
+      ${e.id?`<button class="btn-ghost" style="color:#C0392B;margin-right:auto;" onclick="accDeleteExpense('${e.id}')">Supprimer</button>`:""}
+      <button class="btn-ghost" onclick="closeAllModals()">Annuler</button>
+      <button class="btn-primary" onclick="accSaveExpense(${e.id?`'${e.id}'`:"null"})">Enregistrer</button>
+    </div>`;
+}
+window.accAddExpense  = function() { document.getElementById("opsModalContent").innerHTML = accExpenseForm(null); openModal("opsModal"); };
+window.accEditExpense = function(id) { const e = accExpenses.find(x=>x.id===id); if(!e) return; document.getElementById("opsModalContent").innerHTML = accExpenseForm(e); openModal("opsModal"); };
+window.accSaveExpense = async function(editId) {
+  const g = id => document.getElementById(id);
+  const amount = opsParsePx(g("ae-amount").value);
+  if (!amount) { showToast("Indiquez un montant"); return; }
+  const data = {
+    date: g("ae-date").value || accToday(),
+    amount,
+    category: g("ae-cat").value,
+    vendor: g("ae-vendor").value.trim(),
+    isBusiness: g("ae-biz").checked,
+    taxable: g("ae-tax").checked,
+    notes: g("ae-notes").value.trim(),
+    updatedAt: serverTimestamp()
+  };
+  try {
+    if (editId) { await updateDoc(doc(db,"accounting_expenses",editId), data); }
+    else { data.createdAt = serverTimestamp(); data.createdBy = currentUser.uid; await addDoc(collection(db,"accounting_expenses"), data); }
+    closeAllModals(); showToast(editId ? "Dépense modifiée ✓" : "Dépense ajoutée ✓");
+  } catch(err) { console.warn("Expense save failed:", err); showToast("Échec de l'enregistrement"); }
+};
+window.accDeleteExpense = async function(id) {
+  if (!confirm("Supprimer cette dépense?")) return;
+  try { await deleteDoc(doc(db,"accounting_expenses",id)); closeAllModals(); showToast("Dépense supprimée"); }
+  catch(err) { console.warn(err); showToast("Échec de la suppression"); }
+};
+
+// ── Render (expenses tab) ──────────────────────────────────
+function accRenderExpenses() {
+  const list = [...accBusinessExpenses()].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  const totalAmt    = list.reduce((s,e)=>s+(e.amount||0),0);
+  const totalCredit = list.reduce((s,e)=>{const t=accExpenseTax(e);return s+t.gst+t.qst;},0);
+
+  const kpis = `
+    <div class="ops-kpi-row" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:1.25rem;">
+      <div class="ops-kpi" style="border-left-color:#C0392B">
+        <div class="ops-kpi-l">Dépenses d'affaires</div>
+        <div class="ops-kpi-v">${opsFmtPx(Math.round(totalAmt))}</div>
+        <div class="ops-kpi-s">${list.length} dépense${list.length!==1?"s":""} · taxes incl.</div>
+      </div>
+      <div class="ops-kpi" style="border-left-color:#9B59B6">
+        <div class="ops-kpi-l" style="color:#9B59B6;">Crédits de taxe</div>
+        <div class="ops-kpi-v" style="color:#9B59B6;">${opsFmtPx(Math.round(totalCredit))}</div>
+        <div class="ops-kpi-s">TPS/TVQ récupérable (CTI/RTI)</div>
+      </div>
+      <div class="ops-kpi" style="border-left-color:#1D9E75;background:#F0FBF6;">
+        <div class="ops-kpi-l" style="color:#1A7A4A;">Coût net</div>
+        <div class="ops-kpi-v" style="color:#1A7A4A;">${opsFmtPx(Math.round(totalAmt-totalCredit))}</div>
+        <div class="ops-kpi-s" style="color:#1A7A4A;">après récupération des taxes</div>
+      </div>
+    </div>`;
+
+  const addBtn = `<div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+      <button class="btn-primary" style="width:auto;padding:9px 18px;" onclick="accAddExpense()">+ Ajouter une dépense</button></div>`;
+
+  const rows = list.map(e=>{
+    const t = accExpenseTax(e); const credit = t.gst + t.qst;
+    const taxTag = e.taxable===false
+      ? `<span style="font-size:10px;color:var(--text-3);">hors taxes</span>`
+      : `<span style="font-size:11px;color:#9B59B6;">CTI/RTI ${opsFmtPx(Math.round(credit))}</span>`;
+    return `
+    <div class="ops-deal-row">
+      <div class="ops-deal-dot" style="background:#C0392B;"></div>
+      <div class="ops-deal-info">
+        <div class="ops-deal-addr">${e.vendor||"—"}
+          <span class="ops-pill" style="background:#88878018;color:#666;border:1px solid #8887803a;margin-left:6px;">${e.category||"Autre"}</span>
+        </div>
+        <div class="ops-deal-meta">${opsFmtDate(e.date)}${e.notes?" · "+e.notes:""}</div>
+      </div>
+      <div style="text-align:right;min-width:140px;">
+        <div class="ops-deal-price">${opsFmtPx(Math.round(e.amount||0))}</div>
+        <div style="margin-top:2px;">${taxTag}</div>
+        <div style="margin-top:6px;display:flex;gap:10px;justify-content:flex-end;">
+          <span style="font-size:11px;color:var(--text-3);cursor:pointer;" onclick="accEditExpense('${e.id}')">Modifier</span>
+          <span style="font-size:11px;color:#C0392B;cursor:pointer;" onclick="accDeleteExpense('${e.id}')">Suppr.</span>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+
+  return kpis + addBtn + `<div class="ops-card">${list.length?rows:`<div class="ops-empty">Aucune dépense enregistrée. Cliquez « Ajouter une dépense ».</div>`}</div>`;
 }
