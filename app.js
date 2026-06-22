@@ -549,6 +549,7 @@ window.handleLogout = async function() {
   if (unsubscribeOpsListings) unsubscribeOpsListings();
   if (unsubscribeOpsPurchases) unsubscribeOpsPurchases();
   if (unsubscribeOpsBuyers) unsubscribeOpsBuyers();
+  if (unsubscribeReceivables) { unsubscribeReceivables(); unsubscribeReceivables = null; }
   await signOut(auth);
 };
 function showLogin() {
@@ -573,6 +574,9 @@ function setupRoleUI() {
     document.getElementById("adminNav").style.display="";
     document.getElementById("dashNavMobile").style.display="";
     document.getElementById("adminNavMobile").style.display="";
+    document.getElementById("comptaNav").style.display="";
+    document.getElementById("comptaNavMobile").style.display="";
+    if (!unsubscribeReceivables) subscribeToReceivables();
     document.getElementById("addProspectBtn").style.display="";
   }
   // Ops nav always shown (access controlled per-dossier)
@@ -833,12 +837,13 @@ window.switchView = function(name, el) {
   document.getElementById(`view-${name}`).classList.add("active");
   if (el) document.querySelectorAll(`[data-view="${name}"]`).forEach(n=>n.classList.add("active"));
   document.getElementById("mobileTitle").textContent =
-    name==="prospects"?"Prospects":name==="dashboard"?"Dashboard":name==="targets"?"Today's Targets":name==="performance"?"My Performance":name==="ops"?"BACHA Ops":name==="database"?"Database":"Admin";
+    name==="prospects"?"Prospects":name==="dashboard"?"Dashboard":name==="targets"?"Today's Targets":name==="performance"?"My Performance":name==="ops"?"BACHA Ops":name==="database"?"Database":name==="comptabilite"?"Comptabilité":"Admin";
   if (name==="dashboard") renderDashboard();
   if (name==="admin") renderAdmin();
   if (name==="targets") renderTargetsView();
   if (name==="performance") renderPerformanceView();
   if (name==="ops") renderOps(); if (name==="database") renderDatabase();
+  if (name==="comptabilite") renderComptabilite();
 };
 window.toggleMobileNav = function() { const d=document.getElementById("mobileDrawer"); d.style.display=d.style.display==="block"?"none":"block"; };
 window.closeMobileNav = function() { document.getElementById("mobileDrawer").style.display="none"; };
@@ -907,6 +912,7 @@ function subscribeToOps() {
       if (opsView==="listings" && opsListingView==="checklist" && onlyDataChanged) return;
       renderOps();
     }
+    if (document.getElementById("view-comptabilite")?.classList.contains("active")) renderComptabilite();
   });
   const pq = query(collection(db,"ops_purchases"), orderBy("createdAt","desc"));
   let _prevPurchaseIds = [];
@@ -921,6 +927,7 @@ function subscribeToOps() {
       if (opsView==="listings" && opsListingView==="checklist" && onlyPDataChanged) return;
       renderOps();
     }
+    if (document.getElementById("view-comptabilite")?.classList.contains("active")) renderComptabilite();
   });
   const bq = query(collection(db,"ops_buyers"), orderBy("createdAt","desc"));
   unsubscribeOpsBuyers = onSnapshot(bq, snap => {
@@ -3145,22 +3152,12 @@ window.opsShowNote = function(aid, note) {
     <div class="modal-actions"><button class="btn-primary" style="width:auto;padding:9px 20px;" onclick="closeAllModals()">Fermer</button></div>`;
   openModal("opsModal");
 };
+
+
 /* ════════════════════════════════════════════════════════════════════════
-   TRACK — COMPTABILITÉ · PHASE 1
-   Receivables / income engine + projected-revenue view (owner-only)
-
-   PASTE this whole block into app.js (a good spot is right after the Ops
-   section, e.g. after the buyers code / before the Database section).
-
-   It is self-contained except for FIVE small wiring edits listed at the
-   bottom of this file (nav, switchView, setupRoleUI, subscribe/unsubscribe,
-   and two one-line re-render hooks in the ops snapshots).
-
-   Reuses existing helpers: opsParsePx, opsFmtPx, opsFmtDate, openModal,
-   closeAllModals, showToast, and globals opsListings / opsPurchases /
-   OPS_PURCHASE_SOLD / currentUser / isAdmin.
+   TRACK — COMPTABILITÉ · PHASE 1  (receivables engine + projected revenue)
+   Appended module. All nav/switchView/role/subscription wiring is applied above.
    ════════════════════════════════════════════════════════════════════════ */
-
 // ── Commission waterfall constants ─────────────────────────
 // Reverse-engineered from the corporate pay stub (reconciles to the penny).
 const ACC_COMM_RATE        = 0.02;     // BACHA commission on sale price
@@ -3446,70 +3443,3 @@ function accRenderReceived(list) {
   return `<div class="ops-card">${list.length ? rows
     : `<div class="ops-empty">Aucun paiement encaissé pour l'instant.</div>`}</div>`;
 }
-
-/* ════════════════════════════════════════════════════════════════════════
-   FIVE WIRING EDITS (apply by hand in app.js / index.html)
-   ════════════════════════════════════════════════════════════════════════
-
-   1) index.html — add the owner-only nav item in BOTH menus (hidden by
-      default, shown for admins), right after the Admin item.
-
-      Sidebar (after the adminNav <a>, ~line 62):
-        <a href="#" class="nav-item" data-view="comptabilite" id="comptaNav"
-           onclick="switchView('comptabilite',this)" style="display:none;">
-          <span class="nav-icon">$</span> Comptabilité
-        </a>
-
-      Mobile drawer (after adminNavMobile, ~line 84):
-        <a href="#" class="nav-item" data-view="comptabilite" id="comptaNavMobile"
-           onclick="switchView('comptabilite',this);closeMobileNav()" style="display:none;">$ Comptabilité</a>
-
-   2) index.html — add the section container inside <main>, after view-admin
-      (~line 181):
-
-        <div id="view-comptabilite" class="view">
-          <div class="view-header">
-            <div>
-              <h2 class="view-title">Comptabilité</h2>
-              <p class="view-sub">Revenus projetés &amp; encaissés</p>
-            </div>
-          </div>
-          <div id="comptaContent"></div>
-        </div>
-
-   3) app.js — switchView() (~line 836-841): extend the mobileTitle ternary and
-      add a dispatch line.
-
-        ...name==="database"?"Database":name==="comptabilite"?"Comptabilité":"Admin";
-        ...
-        if (name==="comptabilite") renderComptabilite();
-
-   4) app.js — setupRoleUI() (~line 571-575, inside the `if (isAdmin)` block that
-      reveals adminNav): also reveal the new nav + start the subscription.
-
-        document.getElementById("comptaNav").style.display="";
-        document.getElementById("comptaNavMobile").style.display="";
-        if (!unsubscribeReceivables) subscribeToReceivables();
-
-   5) app.js — logout cleanup (~line 549-551, beside the other ops unsubscribes):
-
-        if (unsubscribeReceivables) { unsubscribeReceivables(); unsubscribeReceivables = null; }
-
-   OPTIONAL (keeps the section live when a deal changes while you're viewing it):
-   in subscribeToOps(), inside BOTH onSnapshot callbacks, add one line so the
-   accounting view re-renders too:
-
-        if (document.getElementById("view-comptabilite")?.classList.contains("active")) renderComptabilite();
-
-   ════════════════════════════════════════════════════════════════════════
-   FIRESTORE SECURITY RULE (add manually in the Firebase console)
-   ════════════════════════════════════════════════════════════════════════
-
-   match /accounting_receivables/{dealId} {
-     allow read, write: if request.auth != null
-       && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
-   }
-
-   (Owner-only, matching the section's isAdmin gate. Adjust the users/role path
-   if your profile collection differs.)
-   ════════════════════════════════════════════════════════════════════════ */
