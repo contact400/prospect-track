@@ -552,6 +552,7 @@ window.handleLogout = async function() {
   if (unsubscribeReceivables) { unsubscribeReceivables(); unsubscribeReceivables = null; }
   if (unsubscribeExpenses) { unsubscribeExpenses(); unsubscribeExpenses = null; }
   if (unsubscribeRecurring) { unsubscribeRecurring(); unsubscribeRecurring = null; }
+  if (unsubscribeAccSettings) { unsubscribeAccSettings(); unsubscribeAccSettings = null; }
   await signOut(auth);
 };
 function showLogin() {
@@ -581,6 +582,7 @@ function setupRoleUI() {
     if (!unsubscribeReceivables) subscribeToReceivables();
     if (!unsubscribeExpenses) subscribeToExpenses();
     if (!unsubscribeRecurring) subscribeToRecurring();
+    if (!unsubscribeAccSettings) subscribeToAccSettings();
     document.getElementById("addProspectBtn").style.display="";
   }
   // Ops nav always shown (access controlled per-dossier)
@@ -3361,6 +3363,7 @@ function renderComptabilite() {
       <button class="ops-tab${accView==="recurring"?" active":""}" onclick="accSetView('recurring')">
         Récurrent <span class="ops-tab-count">${accRecurring.filter(t=>t.active!==false).length}</span></button>
       <button class="ops-tab${accView==="pnl"?" active":""}" onclick="accSetView('pnl')">Résultats</button>
+      <button class="ops-tab${accView==="tax"?" active":""}" onclick="accSetView('tax')">Taxes</button>
     </div>`;
 
   const kpis = `
@@ -3387,6 +3390,7 @@ function renderComptabilite() {
       </div>
     </div>`;
 
+  if (accView === "tax") { el.innerHTML = tabs + accRenderTax(); return; }
   if (accView === "pnl") { el.innerHTML = tabs + accRenderPnl(); return; }
   if (accView === "recurring") { el.innerHTML = tabs + accRenderRecurring(); return; }
   if (accView === "expenses") { el.innerHTML = tabs + accRenderExpenses(); return; }
@@ -3940,3 +3944,246 @@ function accRenderPnl() {
 
   return toggle + kpis + table;
 }
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   TRACK — COMPTABILITÉ · PHASE 5  (tax estimate + accountant export)
+   TPS/TVQ remittance as two separate buckets (collected − credits) by filing
+   period; configurable filing frequency; optional income-tax reserve at a
+   user-set rate; single Excel workbook export (Revenus / Dépenses / Sommaire).
+   ESTIMATES ONLY — to validate with the accountant. Regular method assumed
+   (ITCs/RTIs recovered). Tax recognized on the accrual (deed-date) basis.
+   ════════════════════════════════════════════════════════════════════════ */
+
+let unsubscribeAccSettings = null;
+let accTaxSettings = { gstFilingFreq:"quarterly", reserveRate:0.122, reserveOn:true };
+
+function subscribeToAccSettings() {
+  unsubscribeAccSettings = onSnapshot(doc(db,"accounting_settings","config"), snap => {
+    if (snap.exists()) accTaxSettings = { ...accTaxSettings, ...snap.data() };
+    if (document.getElementById("view-comptabilite")?.classList.contains("active")) renderComptabilite();
+  });
+}
+async function accSaveSettings(patch) {
+  accTaxSettings = { ...accTaxSettings, ...patch };
+  try { await setDoc(doc(db,"accounting_settings","config"), patch, { merge:true }); }
+  catch(e) { console.warn("Settings save failed:", e); showToast("Échec de l'enregistrement"); }
+}
+window.accSetFilingFreq = function(v) { accSaveSettings({ gstFilingFreq:v }); };
+window.accToggleReserve = function() { accSaveSettings({ reserveOn: !accTaxSettings.reserveOn }); };
+window.accApplyReserveRate = function() {
+  const raw = document.getElementById("acc-reserve-rate").value;
+  const pct = parseFloat(String(raw).replace(",","."));
+  if (isNaN(pct) || pct < 0) { showToast("Taux invalide"); return; }
+  accSaveSettings({ reserveRate: pct/100 });
+};
+
+// ── Period helpers (filing frequency) ──────────────────────
+function accTaxPeriodKey(ymd, freq) {
+  const [y,m] = ymd.slice(0,7).split("-").map(Number);
+  if (freq === "annual")    return `${y}`;
+  if (freq === "quarterly") return `${y}-Q${Math.floor((m-1)/3)+1}`;
+  return `${y}-${String(m).padStart(2,"0")}`;
+}
+function accTaxPeriodLabel(key, freq) {
+  if (freq === "annual")    return key;
+  if (freq === "quarterly") { const [y,q] = key.split("-Q"); return `T${q} ${y}`; }
+  const [y,m] = key.split("-");
+  const s = new Date(+y, +m-1, 1).toLocaleDateString("fr-CA", { month:"short", year:"numeric" });
+  return s.charAt(0).toUpperCase()+s.slice(1);
+}
+
+// ── Build remittance buckets ───────────────────────────────
+function accBuildTax() {
+  const freq = accTaxSettings.gstFilingFreq || "quarterly";
+  const P = {};
+  const bk = k => (P[k] || (P[k] = { gstColl:0, qstColl:0, gstCred:0, qstCred:0 }));
+  accBuildReceivables().forEach(r => {
+    if (!r.dateEarned) return;
+    const c = opsCommission(r.salePrice);
+    const b = bk(accTaxPeriodKey(r.dateEarned, freq));
+    b.gstColl += c.gstColl; b.qstColl += c.qstColl;
+    b.gstCred += c.gstItc;  b.qstCred += c.qstItr; // retribution credits
+  });
+  accExpenses.filter(e => e.isBusiness !== false).forEach(e => {
+    if (!e.date) return;
+    const t = accExpenseTax(e);
+    const b = bk(accTaxPeriodKey(e.date, freq));
+    b.gstCred += t.gst; b.qstCred += t.qst;
+  });
+  return { freq, periods:P };
+}
+
+function accReserveYtd() {
+  const M = accBuildPnl("accrual");
+  const year = String(new Date().getFullYear());
+  let net = 0;
+  Object.keys(M).forEach(k => { if (k.startsWith(year)) { const m=M[k]; net += m.rev - m.retrib - m.opex; } });
+  const rate = (accTaxSettings.reserveRate != null) ? accTaxSettings.reserveRate : 0.122;
+  return { net, rate, reserve: Math.max(0,net) * rate };
+}
+
+// ── Render (taxes tab) ─────────────────────────────────────
+function accRenderTax() {
+  const { freq, periods } = accBuildTax();
+  const keys = Object.keys(periods).sort().reverse();
+  const totGstNet = keys.reduce((s,k)=>s+(periods[k].gstColl-periods[k].gstCred),0);
+  const totQstNet = keys.reduce((s,k)=>s+(periods[k].qstColl-periods[k].qstCred),0);
+  const { net, rate, reserve } = accReserveYtd();
+  const year = new Date().getFullYear();
+  const reserveOn = accTaxSettings.reserveOn !== false;
+
+  const kpis = `
+    <div class="ops-kpi-row" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:1rem;">
+      <div class="ops-kpi" style="border-left-color:#185FA5">
+        <div class="ops-kpi-l">TPS à remettre</div>
+        <div class="ops-kpi-v">${opsFmtPx(Math.round(totGstNet))}</div>
+        <div class="ops-kpi-s">perçue − crédits (CTI)</div>
+      </div>
+      <div class="ops-kpi" style="border-left-color:#534AB7">
+        <div class="ops-kpi-l">TVQ à remettre</div>
+        <div class="ops-kpi-v">${opsFmtPx(Math.round(totQstNet))}</div>
+        <div class="ops-kpi-s">perçue − crédits (RTI)</div>
+      </div>
+      ${reserveOn ? `
+      <div class="ops-kpi" style="border-left-color:#BA7517;background:#FFFBF2;">
+        <div class="ops-kpi-l" style="color:#8A5512;">Réserve d'impôt ${year}</div>
+        <div class="ops-kpi-v" style="color:#8A5512;">${opsFmtPx(Math.round(reserve))}</div>
+        <div class="ops-kpi-s" style="color:#8A5512;">${(rate*100).toFixed(1).replace(".",",")} % du bénéfice net</div>
+      </div>` : ""}
+    </div>`;
+
+  const controls = `
+    <div class="ops-card" style="margin-bottom:1rem;display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end;">
+      <div class="form-group" style="margin:0;min-width:180px;">
+        <label>Fréquence de déclaration</label>
+        <select onchange="accSetFilingFreq(this.value)">
+          <option value="monthly"${freq==="monthly"?" selected":""}>Mensuelle</option>
+          <option value="quarterly"${freq==="quarterly"?" selected":""}>Trimestrielle</option>
+          <option value="annual"${freq==="annual"?" selected":""}>Annuelle</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin:0;min-width:150px;">
+        <label>Taux de réserve d'impôt (%)</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="acc-reserve-rate" value="${(rate*100).toFixed(1).replace(".",",")}" style="max-width:80px;" oninput="this.value=this.value.replace(/[^0-9.,]/g,'')">
+          <button class="btn-ghost" style="padding:6px 12px;" onclick="accApplyReserveRate()">Appliquer</button>
+        </div>
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:13px;margin-top:6px;">
+          <input type="checkbox" ${reserveOn?"checked":""} onchange="accToggleReserve()"> Afficher la réserve</label>
+      </div>
+      <div style="margin-left:auto;">
+        <button class="btn-primary" style="width:auto;padding:9px 18px;" onclick="accExportWorkbook()">⤓ Exporter pour le comptable (Excel)</button>
+      </div>
+    </div>`;
+
+  const th = 'style="padding:8px 10px;font-size:11px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:0.03em;border-bottom:1px solid rgba(0,0,0,0.08);text-align:right;"';
+  const thL = th.replace('text-align:right','text-align:left');
+  const td = 'style="padding:9px 10px;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.05);text-align:right;"';
+
+  const body = keys.map(k => {
+    const p = periods[k]; const gstNet = p.gstColl-p.gstCred; const qstNet = p.qstColl-p.qstCred;
+    return `<tr>
+      <td style="padding:9px 10px;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.05);text-align:left;font-weight:500;">${accTaxPeriodLabel(k,freq)}</td>
+      <td ${td}>${opsFmtPx(Math.round(p.gstColl))}</td>
+      <td ${td} style="padding:9px 10px;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.05);text-align:right;color:var(--text-3);">−${opsFmtPx(Math.round(p.gstCred))}</td>
+      <td ${td} style="padding:9px 10px;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.05);text-align:right;font-weight:600;color:#185FA5;">${opsFmtPx(Math.round(gstNet))}</td>
+      <td ${td}>${opsFmtPx(Math.round(p.qstColl))}</td>
+      <td ${td} style="padding:9px 10px;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.05);text-align:right;color:var(--text-3);">−${opsFmtPx(Math.round(p.qstCred))}</td>
+      <td ${td} style="padding:9px 10px;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.05);text-align:right;font-weight:600;color:#534AB7;">${opsFmtPx(Math.round(qstNet))}</td>
+    </tr>`;
+  }).join("");
+
+  const table = `
+    <div class="ops-card" style="padding:4px 8px;overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;min-width:640px;">
+        <thead><tr>
+          <th ${thL}>Période</th>
+          <th ${th}>TPS perçue</th><th ${th}>CTI</th><th ${th}>TPS nette</th>
+          <th ${th}>TVQ perçue</th><th ${th}>RTI</th><th ${th}>TVQ nette</th>
+        </tr></thead>
+        <tbody>${keys.length ? body : `<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--text-3);font-size:13px;">Aucune donnée fiscale pour l'instant.</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div style="font-size:11px;color:var(--text-3);margin-top:10px;line-height:1.5;">
+      TPS et TVQ traitées comme deux comptes distincts. Base exercice (taxe percevable à l'acte de vente),
+      méthode régulière présumée (crédits récupérés). <b>Estimation</b> — la fréquence réelle, la méthode de
+      comptabilité et le taux d'impôt sont à confirmer avec votre comptable.
+    </div>`;
+
+  return kpis + controls + table;
+}
+
+// ── Excel export (single workbook, 3 tabs) ─────────────────
+window.accExportWorkbook = async function() {
+  showToast("Génération du fichier…");
+  let XLSX;
+  try { XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs"); }
+  catch(e) { console.warn("SheetJS load failed:", e); showToast("Échec du chargement du module Excel"); return; }
+
+  const statusLabel = s => s==="received"?"Reçu":s==="earned"?"Gagné":"Attendu";
+
+  // Revenus
+  const incomeAOA = [["Date acte","Date réception","Adresse","Type","Prix de vente","Commission brute","Rétribution RE/MAX","Net (1,9%)","TPS perçue","TVQ perçue","Statut"]];
+  accBuildReceivables()
+    .sort((a,b)=>(b.dateEarned||"").localeCompare(a.dateEarned||""))
+    .forEach(r => {
+      const c = opsCommission(r.salePrice);
+      incomeAOA.push([
+        r.dateEarned||"", r.actualReceivedDate||"", r.addr||"", r.dealType==="l"?"Inscription":"Achat",
+        round2(r.salePrice), round2(c.gross), round2(c.retrib), round2(c.net),
+        round2(c.gstColl), round2(c.qstColl), statusLabel(r.status)
+      ]);
+    });
+
+  // Dépenses
+  const expAOA = [["Date","Fournisseur","Catégorie","Montant (taxes incl.)","TPS (CTI)","TVQ (RTI)","Coût net","Affaires","Taxable","Récurrent"]];
+  [...accExpenses].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).forEach(e => {
+    const t = accExpenseTax(e); const netCost = (e.amount||0)-t.gst-t.qst;
+    expAOA.push([
+      e.date||"", e.vendor||"", e.category||"", round2(e.amount||0),
+      round2(t.gst), round2(t.qst), round2(netCost),
+      e.isBusiness===false?"Non":"Oui", e.taxable===false?"Non":"Oui", e.generated?"Oui":"Non"
+    ]);
+  });
+
+  // Sommaire
+  const { freq, periods } = accBuildTax();
+  const pkeys = Object.keys(periods).sort();
+  const M = accBuildPnl("accrual"); const year = String(new Date().getFullYear());
+  let yRev=0,yRet=0,yOpex=0; Object.keys(M).forEach(k=>{ if(k.startsWith(year)){yRev+=M[k].rev;yRet+=M[k].retrib;yOpex+=M[k].opex;} });
+  const yNet = yRev-yRet-yOpex;
+  const { rate, reserve } = accReserveYtd();
+
+  const sumAOA = [
+    [`SOMMAIRE — Comptabilité Track · ${accToday()}`],
+    [],
+    ["Remise TPS/TVQ par période (base exercice)"],
+    ["Période","TPS perçue","CTI","TPS nette","TVQ perçue","RTI","TVQ nette"],
+  ];
+  pkeys.forEach(k => { const p=periods[k];
+    sumAOA.push([accTaxPeriodLabel(k,freq), round2(p.gstColl), round2(p.gstCred), round2(p.gstColl-p.gstCred), round2(p.qstColl), round2(p.qstCred), round2(p.qstColl-p.qstCred)]);
+  });
+  sumAOA.push([], [`Résultats — ${year} (base exercice)`], ["Revenus (commission brute)", round2(yRev)],
+    ["Rétribution RE/MAX", round2(yRet)], ["Dépenses d'affaires (coût net)", round2(yOpex)], ["Bénéfice net (avant impôt)", round2(yNet)], []);
+  if (accTaxSettings.reserveOn !== false) sumAOA.push([`Réserve d'impôt estimée (${(rate*100).toFixed(1)} %)`, round2(reserve)], []);
+  sumAOA.push(["Estimation préparée par Track — à valider avec votre comptable."],
+    ["Méthode régulière présumée; fréquence et taux à confirmer."]);
+
+  const wb = XLSX.utils.book_new();
+  const wsS = XLSX.utils.aoa_to_sheet(sumAOA);
+  const wsI = XLSX.utils.aoa_to_sheet(incomeAOA);
+  const wsE = XLSX.utils.aoa_to_sheet(expAOA);
+  wsI["!cols"] = [{wch:12},{wch:12},{wch:28},{wch:12},{wch:14},{wch:16},{wch:16},{wch:12},{wch:12},{wch:12},{wch:10}];
+  wsE["!cols"] = [{wch:12},{wch:22},{wch:24},{wch:18},{wch:12},{wch:12},{wch:12},{wch:10},{wch:10},{wch:10}];
+  wsS["!cols"] = [{wch:34},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14}];
+  XLSX.utils.book_append_sheet(wb, wsS, "Sommaire");
+  XLSX.utils.book_append_sheet(wb, wsI, "Revenus");
+  XLSX.utils.book_append_sheet(wb, wsE, "Dépenses");
+  try { XLSX.writeFile(wb, `Track_Comptabilite_${accToday()}.xlsx`); showToast("Fichier Excel généré ✓"); }
+  catch(e) { console.warn(e); showToast("Échec de la génération"); }
+};
+
+function round2(n){ return Math.round((Number(n)||0)*100)/100; }
