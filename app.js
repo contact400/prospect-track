@@ -3236,6 +3236,7 @@ function accBuildReceivables() {
   opsPurchases
     .filter(p => OPS_PURCHASE_SOLD.includes(p.status||"active"))
     .forEach(p => rows.push(accReceivableFor("p", p.id, p.addr, opsParsePx(p.price), p.notaryDate)));
+  Object.entries(accOverrides).forEach(([id, ov]) => { if (ov && ov.manual === true) rows.push(accManualReceivable(id, ov)); });
   return rows;
 }
 function accReceivableFor(type, id, addr, price, notaryDate) {
@@ -3394,7 +3395,8 @@ function renderComptabilite() {
   if (accView === "pnl") { el.innerHTML = tabs + accRenderPnl(); return; }
   if (accView === "recurring") { el.innerHTML = tabs + accRenderRecurring(); return; }
   if (accView === "expenses") { el.innerHTML = tabs + accRenderExpenses(); return; }
-  el.innerHTML = tabs + kpis + (accView === "received"
+  const addSale = `<div style="display:flex;justify-content:flex-end;margin-bottom:12px;"><button class="btn-primary" style="width:auto;padding:9px 18px;" onclick="accAddSale()">+ Ajouter une vente</button></div>`;
+  el.innerHTML = tabs + kpis + addSale + (accView === "received"
     ? accRenderReceived(received)
     : accRenderProjected(notReceived));
 }
@@ -3414,6 +3416,7 @@ function accRenderProjected(list) {
         <div class="ops-deal-addr">${r.addr}
           <span class="ops-pill" style="background:${st.color}1A;color:${st.color};border:1px solid ${st.color}40;margin-left:6px;cursor:pointer;"
                 onclick="accAdvanceStatus('${r.dealId}','${r.status}')" title="Avancer le statut">${st.label} →</span>
+          ${r.manual?`<span class="ops-pill" style="background:#88878018;color:#888;border:1px solid #8887803a;margin-left:4px;">manuel</span>`:""}
         </div>
         <div class="ops-deal-meta">
           Vente ${opsFmtPx(r.salePrice)} · net ${opsFmtPx(Math.round(r.net))} · taxes ${opsFmtPx(Math.round(r.taxToRemit))}
@@ -3427,6 +3430,7 @@ function accRenderProjected(list) {
         <div style="font-size:11px;color:var(--text-3);margin-top:2px;">cumul ${opsFmtPx(Math.round(running))}</div>
         <div style="margin-top:6px;display:flex;gap:8px;justify-content:flex-end;">
           <span style="font-size:11px;color:#1D9E75;cursor:pointer;font-weight:600;" onclick="accMarkReceived('${r.dealId}')">Marquer reçu</span>
+          ${r.manual?`<span style="font-size:11px;color:var(--text-3);cursor:pointer;" onclick="accEditSale('${r.dealId}')">Modifier</span>`:""}
           <span style="font-size:11px;color:var(--text-3);cursor:pointer;" onclick="accEditNotes('${r.dealId}')">Note</span>
         </div>
       </div>
@@ -3446,6 +3450,7 @@ function accRenderReceived(list) {
       <div class="ops-deal-info">
         <div class="ops-deal-addr">${r.addr}
           <span class="ops-pill" style="background:#1D9E751A;color:#1D9E75;border:1px solid #1D9E7540;margin-left:6px;">Reçu</span>
+          ${r.manual?`<span class="ops-pill" style="background:#88878018;color:#888;border:1px solid #8887803a;margin-left:4px;">manuel</span>`:""}
         </div>
         <div class="ops-deal-meta">Vente ${opsFmtPx(r.salePrice)} · reçu le ${opsFmtDate(r.actualReceivedDate)}</div>
       </div>
@@ -3453,6 +3458,7 @@ function accRenderReceived(list) {
         <div class="ops-deal-price">${opsFmtPx(Math.round(amt))}</div>
         <div style="font-size:11px;color:var(--text-3);cursor:pointer;margin-top:4px;"
              onclick="accRevertStatus('${r.dealId}','received')" title="Annuler la réception">↩ rétablir</div>
+        ${r.manual?`<div style="font-size:11px;color:var(--text-3);cursor:pointer;margin-top:4px;" onclick="accEditSale('${r.dealId}')">Modifier</div>`:""}
       </div>
     </div>`;
   }).join("");
@@ -4187,3 +4193,113 @@ window.accExportWorkbook = async function() {
 };
 
 function round2(n){ return Math.round((Number(n)||0)*100)/100; }
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   TRACK — COMPTABILITÉ · manual sales (backfill historical receivables)
+   Standalone receivables stored in accounting_receivables with manual:true.
+   Same shape as derived deals → flow through projected/received, P&L, and
+   the TPS/TVQ remittance for their deed-date period. Commission auto-computed
+   from sale price via the standard waterfall.
+   ════════════════════════════════════════════════════════════════════════ */
+
+function accManualReceivable(id, ov) {
+  const c = opsCommission(ov.salePrice || 0);
+  const dateEarned   = ov.dateEarned || "";
+  const expectedDate = ov.expectedDate || (dateEarned ? accAddDays(dateEarned, ACC_EXPECTED_LAG_DAYS) : "");
+  return {
+    dealId:id, dealType: ov.dealType || "p", addr: ov.addr || "—", manual:true,
+    salePrice:c.salePrice, gross:c.gross, net:c.net, deposit:c.deposit, taxToRemit:c.taxToRemit,
+    dateEarned, expectedDate, status: ov.status || "expected",
+    actualReceivedDate: ov.actualReceivedDate || "",
+    actualAmount: (ov.actualAmount != null ? ov.actualAmount : null),
+    notes: ov.notes || ""
+  };
+}
+
+function accSaleForm(r) {
+  r = r || {};
+  const isRecv = r.status === "received";
+  return `
+    <div class="modal-title">${r.dealId ? "Modifier la vente" : "Ajouter une vente"}</div>
+    <div class="modal-sub">Saisie manuelle — ex. ventes d'années antérieures</div>
+    <div style="margin-top:14px;">
+      <div class="form-group"><label>Adresse / description</label>
+        <input type="text" id="as-addr" value="${accEsc(r.addr)}" placeholder="ex: 123 Rue Principale"></div>
+      <div class="form-group" style="display:flex;gap:12px;">
+        <div style="flex:1;"><label>Type</label>
+          <select id="as-type">
+            <option value="p"${r.dealType!=="l"?" selected":""}>Achat</option>
+            <option value="l"${r.dealType==="l"?" selected":""}>Inscription</option>
+          </select></div>
+        <div style="flex:1.4;"><label>Prix de vente</label>
+          <input type="text" id="as-price" value="${r.salePrice?opsFmtPx(Math.round(r.salePrice)):""}" placeholder="ex: 450 000 $"
+                 oninput="this.value=this.value.replace(/[^0-9 ]/g,'')"></div>
+      </div>
+      <div class="form-group"><label>Date de l'acte de vente</label>
+        <input type="date" id="as-earned" value="${r.dateEarned||accToday()}"></div>
+      <div class="form-group" style="margin-bottom:8px;">
+        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:13px;">
+          <input type="checkbox" id="as-recv" ${isRecv?"checked":""}
+            onchange="document.getElementById('as-recv-fields').style.display=this.checked?'block':'none'"> Paiement déjà reçu</label>
+      </div>
+      <div id="as-recv-fields" style="display:${isRecv?"block":"none"};">
+        <div class="form-group" style="display:flex;gap:12px;">
+          <div style="flex:1;"><label>Date de réception</label>
+            <input type="date" id="as-recv-date" value="${r.actualReceivedDate||accToday()}"></div>
+          <div style="flex:1;"><label>Montant reçu (optionnel)</label>
+            <input type="text" id="as-recv-amt" value="${r.actualAmount!=null?opsFmtPx(Math.round(r.actualAmount)):""}" placeholder="auto si vide"
+                   oninput="this.value=this.value.replace(/[^0-9 ]/g,'')"></div>
+        </div>
+      </div>
+      <div class="form-group"><label>Note</label>
+        <input type="text" id="as-notes" value="${accEsc(r.notes)}" placeholder="optionnel"></div>
+      <div style="font-size:11px;color:var(--text-3);line-height:1.5;">
+        La commission (2 %), la rétribution RE/MAX et les taxes sont calculées automatiquement à partir du prix de vente.
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;">
+      ${r.dealId?`<button class="btn-ghost" style="color:#C0392B;margin-right:auto;" onclick="accDeleteSale('${r.dealId}')">Supprimer</button>`:""}
+      <button class="btn-ghost" onclick="closeAllModals()">Annuler</button>
+      <button class="btn-primary" onclick="accSaveSale(${r.dealId?`'${r.dealId}'`:"null"})">Enregistrer</button>
+    </div>`;
+}
+
+window.accAddSale  = function() { document.getElementById("opsModalContent").innerHTML = accSaleForm(null); openModal("opsModal"); };
+window.accEditSale = function(id) {
+  const r = accBuildReceivables().find(x => x.dealId === id && x.manual);
+  if (!r) return;
+  document.getElementById("opsModalContent").innerHTML = accSaleForm(r); openModal("opsModal");
+};
+window.accSaveSale = async function(editId) {
+  const g = id => document.getElementById(id);
+  const price = opsParsePx(g("as-price").value);
+  if (!price) { showToast("Indiquez un prix de vente"); return; }
+  const data = {
+    manual: true,
+    addr: g("as-addr").value.trim(),
+    dealType: g("as-type").value,
+    salePrice: price,
+    dateEarned: g("as-earned").value || accToday(),
+    notes: g("as-notes").value.trim(),
+    updatedAt: serverTimestamp()
+  };
+  if (g("as-recv").checked) {
+    data.status = "received";
+    data.actualReceivedDate = g("as-recv-date").value || accToday();
+    const amt = opsParsePx(g("as-recv-amt").value);
+    data.actualAmount = amt || Math.round(opsCommission(price).deposit);
+  } else {
+    data.status = "expected"; data.actualReceivedDate = ""; data.actualAmount = null;
+  }
+  try {
+    if (editId) { await updateDoc(doc(db,"accounting_receivables",editId), data); }
+    else { data.createdAt = serverTimestamp(); data.createdBy = currentUser.uid; await addDoc(collection(db,"accounting_receivables"), data); }
+    closeAllModals(); showToast(editId ? "Vente modifiée ✓" : "Vente ajoutée ✓");
+  } catch(e) { console.warn("Manual sale save failed:", e); showToast("Échec de l'enregistrement"); }
+};
+window.accDeleteSale = async function(id) {
+  if (!confirm("Supprimer cette vente?")) return;
+  try { await deleteDoc(doc(db,"accounting_receivables",id)); closeAllModals(); showToast("Vente supprimée"); }
+  catch(e) { console.warn(e); showToast("Échec de la suppression"); }
+};
